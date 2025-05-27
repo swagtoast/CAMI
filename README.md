@@ -7,7 +7,6 @@ Questo progetto implementa un sistema per l'identificazione automatica di metafo
 -   `data/`: Contiene il dataset (`CAMI_dataset_v2.csv`) e i testi per l'inferenza (`nuovi_testi/`).
 -   `cami_model/`: Directory dove viene salvato il modello fine-tunato.
 -   `data_utils.py`: Utility per il caricamento, la pulizia e la suddivisione dei dati.
--   `CAMI_Analisi_Esplorativa.ipynb`: Notebook Jupyter/Colab per l'analisi esplorativa dei dati (EDA).
 -   `train_model.py`: Script per il fine-tuning del modello UMBERTO sul dataset CAMI.
 -   `evaluate_model.py`: Script per valutare le performance del modello fine-tunato.
 -   `predict.py`: Script per effettuare inferenze su nuovi testi e calcolare l'indice di figuralità.
@@ -21,7 +20,6 @@ Assicurati di avere Python 3.8+ installato. Le librerie necessarie possono esser
 pip install pandas torch torchvision torchaudio transformers datasets scikit-learn nltk matplotlib plotly
 ```
 
-In Google Colab, esegui le celle con `!pip install ...` se necessario.
 
 ## Setup in Google Colab
 
@@ -44,7 +42,7 @@ In Google Colab, esegui le celle con `!pip install ...` se necessario.
     os.chdir('/content/drive/MyDrive/CAMI_Project') # Adatta questo path se necessario
     ```
 
-4.  **Download risorse NLTK (esegui in una cella Colab):**
+4.  **Download risorse NLTK:**
     ```python
     import nltk
     nltk.download('punkt')
@@ -54,26 +52,23 @@ In Google Colab, esegui le celle con `!pip install ...` se necessario.
 
 ## Esecuzione del Progetto
 
-Segui l'ordine:
 
-1.  **Analisi Esplorativa (Opzionale ma raccomandato):**
-    *   Apri ed esegui `CAMI_Analisi_Esplorativa.ipynb` per comprendere meglio il dataset.
 
-2.  **Training del Modello:**
-    *   Esegui `train_model.py` (da un notebook Colab o terminale):
+1.  **Training del Modello:**
+    *   Esegui `train_model.py`:
         ```python
         !python train_model.py
         ```
-    *   Questo script caricherà i dati, fine-tunerà il modello UMBERTO e lo salverà in `cami_model/`. Assicurati che la GPU sia abilitata in Colab (`Runtime > Change runtime type > GPU`).
+    *   Questo script caricherà i dati, fine-tunerà il modello UMBERTO e lo salverà in `cami_model/`.
 
-3.  **Valutazione del Modello:**
+2.  **Valutazione del Modello:**
     *   Esegui `evaluate_model.py`:
         ```python
         !python evaluate_model.py
         ```
     *   Questo script caricherà il modello fine-tunato e valuterà le sue performance sul test set.
 
-4.  **Inferenza su Nuovi Testi:**
+3.  **Inferenza su Nuovi Testi:**
     *   Assicurati che i tuoi file `.txt` siano in `data/nuovi_testi/`.
     *   Esegui `predict.py`:
         ```python
@@ -81,9 +76,5 @@ Segui l'ordine:
         ```
     *   Questo script analizzerà i testi, predierà le metafore, calcolerà l'indice di figuralità e salverà i risultati in `figurality_results.csv`.
 
-## Note
 
--   Il dataset `CAMI_dataset_v2.csv` deve avere almeno le colonne `testo` (frase) e `etichetta` (0 per non-metafora, 1 per metafora). Le colonne `argomento` e `veicolo` sono usate in `semantics.py` e nell'EDA.
--   La durata del training dipende dalla dimensione del dataset e dalla potenza della GPU.
--   I parametri di training (epoche, batch size, learning rate) in `train_model.py` possono essere aggiustati.
 ```
