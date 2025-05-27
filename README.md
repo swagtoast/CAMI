@@ -75,6 +75,3 @@ pip install pandas torch torchvision torchaudio transformers datasets scikit-lea
         !python predict.py
         ```
     *   Questo script analizzerà i testi, predierà le metafore, calcolerà l'indice di figuralità e salverà i risultati in `figurality_results.csv`.
-
-
-```
