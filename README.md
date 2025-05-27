@@ -24,14 +24,14 @@ pip install pandas torch torchvision torchaudio transformers datasets scikit-lea
 ## Setup in Google Colab
 
 1.  **Carica i file del progetto:**
-    *   Crea una cartella principale, ad esempio `CAMI_Project` nel tuo Google Drive e carica tutti i file `.py`.
+    *   Crea una cartella principale, ad esempio `CAMI` in Google Drive e carica tutti i file `.py`.
     *   Oppure, carica i file direttamente nell'ambiente di runtime di Colab (saranno persi alla chiusura della sessione, a meno che non si monti Drive).
 
 2.  **Prepara i dati:**
-    *   Crea una sottocartella `data` all'interno di `CAMI_Project`.
+    *   Crea una sottocartella `data` all'interno di `CAMI`.
     *   Carica `CAMI_dataset_v2.csv` in `CAMI_Project/data/`.
-    *   Crea una sottocartella `nuovi_testi` in `CAMI_Project/data/`.
-    *   Carica i file `.txt` contenenti i testi su cui fare inferenza in `CAMI_Project/data/nuovi_testi/`.
+    *   Crea una sottocartella `nuovi_testi` in `CAMI/data/`.
+    *   Carica i file `.txt` contenenti i testi su cui fare inferenza in `CAMI/data/nuovi_testi/`.
 
 3.  **Monta Google Drive (consigliato per persistenza):**
     ```python
@@ -39,7 +39,7 @@ pip install pandas torch torchvision torchaudio transformers datasets scikit-lea
     drive.mount('/content/drive')
     # Imposta il path di lavoro
     import os
-    os.chdir('/content/drive/MyDrive/CAMI_Project') # Adatta questo path se necessario
+    os.chdir('/content/drive/MyDrive/CAMI') # Adatta questo path se necessario
     ```
 
 4.  **Download risorse NLTK:**
