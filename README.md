@@ -6,6 +6,7 @@ Questo progetto implementa un sistema per l'identificazione automatica di metafo
 
 -   `data/`: Contiene il dataset (`CAMI_dataset_v2.csv`) e i testi per l'inferenza (`nuovi_testi/`).
 -   `cami_model/`: Directory dove viene salvato il modello fine-tunato.
+-   `CAMI_demo.ipynb`: Notebook Jupyter per testare la qualità del dataset grazie ad un mini-training; permette di fare delle inferenze di test.
 -   `data_utils.py`: Utility per il caricamento, la pulizia e la suddivisione dei dati.
 -   `train_model.py`: Script per il fine-tuning del modello UMBERTO sul dataset CAMI.
 -   `evaluate_model.py`: Script per valutare le performance del modello fine-tunato.
