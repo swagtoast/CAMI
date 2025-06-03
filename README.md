@@ -1,42 +1,33 @@
-# CAMI: Classificatore Automatico di Metafore per l'Italiano
+# CAMI: Classificatore Automatico di Metafore per l’Italiano
 
 Questo progetto fornisce un sistema completo per:
-
 1. **Addestrare** un modello di classificazione (metafora vs. non metafora) su un dataset annotato.
-    
 2. **Valutare** le performance del modello.
-    
 3. **Effettuare inferenza** su nuovi testi in italiano, con:
-    
-    - Rilevazione automatica di metafore (“metafora”/“non metafora”)
-        
-    - Fase _human-in-the-loop_ per frasi incerte (0.35 ≤ prob ≤ 0.65)
-        
-    - Estrazione di “argomento” e “veicolo” per frasi metaforiche
-        
-    - Calcolo dell’indice di figuralità per ciascun testo
-        
-    - Rappresentazione vettoriale di “argomento”/“veicolo” in 2D (PCA)
-        
-    - Visualizzazione della matrice di attenzione (heatmap)
-        
-    - Meccanismo di ri-addestramento automatico ogni 75 annotazioni manuali
-        
+   - Rilevazione automatica di metafore (“metafora”/“non metafora”)
+   - Fase *human-in-the-loop* per frasi incerte (0.35 ≤ prob ≤ 0.65)
+   - Estrazione di “argomento” e “veicolo” per frasi metaforiche
+   - Calcolo dell’indice di figuralità per ciascun testo
+   - Rappresentazione vettoriale di “argomento”/“veicolo” in 2D (PCA)
+   - Visualizzazione della matrice di attenzione (heatmap)
+   - Meccanismo di ri-addestramento automatico ogni 75 annotazioni manuali
 
 ## Struttura del progetto
 
+```text
 .
-├── data_utils.py           # Funzioni per caricamento e preparazione dati
-├── train_model.py          # Script di fine-tuning del modello
-├── evaluate_model.py       # Script di valutazione su test set
-├── semantics.py            # Modulo per misure semantiche (WordNet/OMW)
-├── predict.py              # Script di inferenza su nuovi testi (con human-in-the-loop)
-├── README.md               # Questo file
-├── train.csv               # Generato automaticamente (train/test split)
-├── test.csv                # Generato automaticamente (train/test split)
-├── manual_annotations.csv  # Annotazioni raccolte durante l’inferenza
-├── risultati_inferenza.csv # Risultati aggregati dell’inferenza
-└── CAMI_dataset_v2.csv     # (Non incluso) Dataset originale: colonne [testo, etichetta, argomento, veicolo]
+├── data_utils.py            # Funzioni per caricamento e preparazione dati
+├── train_model.py           # Script di fine-tuning del modello
+├── evaluate_model.py        # Script di valutazione su test set
+├── semantics.py             # Modulo per misure semantiche (WordNet/OMW)
+├── predict.py               # Script di inferenza su nuovi testi (con human-in-the-loop)
+├── README.md                # Questo file
+├── train.csv                # Generato automaticamente (train/test split)
+├── test.csv                 # Generato automaticamente (train/test split)
+├── manual_annotations.csv   # Annotazioni raccolte durante l’inferenza
+├── risultati_inferenza.csv  # Risultati aggregati dell’inferenza
+└── CAMI_dataset_v2.csv      # (Non incluso) Dataset originale: colonne [testo, etichetta, argomento, veicolo]
+```
 
 
 ## Requisiti
