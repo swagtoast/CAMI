@@ -4,7 +4,7 @@ data_utils.py
 Modulo per la preparazione dei dati per il progetto CAMI (Classificatore Automatico di Metafore per l’Italiano).
 
 Contiene funzioni per:
-- Caricare il dataset da CSV (UTF-8), rimuovere duplicati e testi vuoti
+- Caricare il dataset da CSV (UTF-8, delimitato da ';'), rimuovere duplicati e testi vuoti
 - Suddividere in training e test set (80/20) e salvare i CSV
 - Calcolare statistiche esplorative: distribuzione etichette, lunghezza media frasi, top-N per colonne
 """
@@ -14,21 +14,33 @@ from sklearn.model_selection import train_test_split
 
 def load_and_prepare_data(csv_path='data/CAMI_dataset_v2.csv', test_size=0.2, random_state=42):
     """
-    Carica il dataset CSV, rimuove duplicati e testi vuoti, suddivide in train/test.
-    Salva due file: train.csv e test.csv nella directory corrente.
+    Carica il dataset CSV dalla cartella 'data', con separatore ';'.
+    Rimuove duplicati e testi vuoti, poi suddivide in train/test (80/20).
+    Salva due file: train.csv e test.csv nella root del progetto.
     
     Args:
-        csv_path (str): Percorso al file CAMI_dataset_v2.csv (colonne: testo, etichetta, argomento, veicolo).
+        csv_path (str): Percorso al file 'data/CAMI_dataset_v2.csv' (delimitato da ';').
         test_size (float): Percentuale del dataset destinata al set di test.
         random_state (int): Seed per la riproducibilità della suddivisione.
     
     Returns:
-        train_df (pd.DataFrame): DataFrame di training.
-        test_df (pd.DataFrame): DataFrame di test.
+        train_df (pd.DataFrame): DataFrame di training (con colonne: 'testo', 'etichetta', 'argomento', 'veicolo', ...).
+        test_df (pd.DataFrame): DataFrame di test (stesse colonne del train).
     """
-    # Carica con encoding UTF-8
-    df = pd.read_csv(csv_path, encoding='utf-8')
+    # Carica il CSV usando separatore ';'
+    df = pd.read_csv(csv_path, encoding='utf-8', sep=';', engine='python')
     
+    # A questo punto df.columns contiene, ad esempio:
+    # ['Dataset di provenienza', 'tipo_metafora', 'testo', 'etichetta', 'argomento', 'veicolo',
+    #  'Unnamed: 6', 'Unnamed: 7', ...]
+    # Scartiamo tutte le colonne "Unnamed" oltre la colonna 5:
+    keep_cols = ['testo', 'etichetta', 'argomento', 'veicolo']
+    # Verifica che esistano davvero tutte (in caso facciano parte di header modificato, alza errore).
+    for col in keep_cols:
+        if col not in df.columns:
+            raise KeyError(f"Colonna '{col}' non trovata. Controlla il CSV (colonne: {df.columns.tolist()})")
+    df = df[keep_cols].copy()
+
     # Rimuovi duplicati basati sulla colonna 'testo'
     df.drop_duplicates(subset='testo', inplace=True)
     
@@ -43,7 +55,7 @@ def load_and_prepare_data(csv_path='data/CAMI_dataset_v2.csv', test_size=0.2, ra
         stratify=df['etichetta']
     )
     
-    # Salva i file su disco
+    # Salva i file su disco (nella root del progetto)
     train_df.to_csv('train.csv', index=False, encoding='utf-8')
     test_df.to_csv('test.csv', index=False, encoding='utf-8')
     
@@ -71,7 +83,6 @@ def get_average_sentence_length(df):
     Returns:
         float: Lunghezza media (numero medio di parole per frase).
     """
-    # Conteggio parole dividendo sullo spazio
     lengths = df['testo'].apply(lambda x: len(str(x).split()))
     return lengths.mean()
 
