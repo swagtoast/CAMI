@@ -139,8 +139,8 @@ def main():
     Punto di ingresso se eseguito come script.
     Esegue: load_and_prepare_data -> train_model
     """
-    # ATTENZIONE: in Colab assicurarsi di aver caricato CAMI_dataset_v2.csv nella working directory
-    train_df, test_df = data_utils.load_and_prepare_data(csv_path='CAMI_dataset_v2.csv')
+    # Ora load_and_prepare_data legge da data/CAMI_dataset_v2.csv
+    train_df, test_df = data_utils.load_and_prepare_data(csv_path='data/CAMI_dataset_v2.csv')
     train_model(train_df, test_df)
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ Contiene funzioni per:
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-def load_and_prepare_data(csv_path='CAMI_dataset_v2.csv', test_size=0.2, random_state=42):
+def load_and_prepare_data(csv_path='data/CAMI_dataset_v2.csv', test_size=0.2, random_state=42):
     """
     Carica il dataset CSV, rimuove duplicati e testi vuoti, suddivide in train/test.
     Salva due file: train.csv e test.csv nella directory corrente.
