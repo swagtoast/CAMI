@@ -1,3 +1,5 @@
+# CAMI: Classificatore Automatico di Metafore per l'Italiano
+
 Questo progetto fornisce un sistema completo per:
 
 1. **Addestrare** un modello di classificazione (metafora vs. non metafora) su un dataset annotato.
