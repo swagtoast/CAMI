@@ -1,151 +1,149 @@
+"""
+train_model.py
+
+Script per il fine-tuning del modello "Musixmatch/umberto-wikipedia-uncased-v1" su CAMI_dataset_v2.
+
+Funzionalità:
+- Carica i CSV train.csv e test.csv prodotti da data_utils.py
+- Tokenizza in batch, con padding e truncation
+- Imposta TrainingArguments per 3 epoche (batch_size=8, lr=2e-5, salvataggi per epoca)
+- Usa Trainer di HuggingFace per l'addestramento su GPU (se disponibile)
+- Calcola metriche (accuracy, precision, recall, F1) per epoca
+- Salva checkpoint ogni epoca e modello finale in cami_model/
+- Include funzioni riusabili per l'import da altri moduli (es. predict.py)
+"""
+
 import os
-import torch
 import pandas as pd
+import torch
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
-    TrainingArguments,
-    Trainer
+    Trainer,
+    TrainingArguments
 )
-from datasets import Dataset
+from datasets import Dataset, DatasetDict
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
-import data_utils # Il nostro modulo
-import logging
-
-# Impostazioni di logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# Commento per Colab: installare le librerie se necessario
-# !pip install transformers datasets scikit-learn torch pandas
-
-# Configurazioni
-MODEL_NAME = "Musixmatch/umberto-wikipedia-uncased-v1"
-DATASET_CSV_PATH = 'data/CAMI_dataset_v2.csv' # Assicurati che il path sia corretto
-OUTPUT_DIR = "./cami_model_finetuned" # Directory per salvare il modello e i checkpoint
-LOGGING_DIR = "./cami_logs"
-
-# Parametri di training
-NUM_EPOCHS = 3
-BATCH_SIZE = 8 # Riduci se hai problemi di memoria (es. OOM error)
-LEARNING_RATE = 2e-5
-MAX_LENGTH = 128 # Lunghezza massima delle sequenze tokenizzate
-
-def preprocess_function(examples, tokenizer):
-    """Tokenizza i testi."""
-    return tokenizer(examples['testo'], truncation=True, padding='max_length', max_length=MAX_LENGTH)
+import data_utils
 
 def compute_metrics(pred):
-    """Calcola metriche per la valutazione."""
+    """
+    Calcola le metriche di valutazione per la classificazione binaria.
+    """
     labels = pred.label_ids
     preds = pred.predictions.argmax(-1)
     precision, recall, f1, _ = precision_recall_fscore_support(labels, preds, average='binary')
     acc = accuracy_score(labels, preds)
     return {
         'accuracy': acc,
-        'f1': f1,
         'precision': precision,
-        'recall': recall
+        'recall': recall,
+        'f1': f1
     }
 
-def train():
-    """Funzione principale per il training del modello."""
-    logging.info("Avvio del processo di training...")
-
-    # 0. Controlla disponibilità GPU
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logging.info(f"Utilizzo del dispositivo: {device}")
-
-    # 1. Caricamento e Preprocessing Dati
-    logging.info("Caricamento e preprocessing dei dati...")
-    train_df, val_df = data_utils.load_and_preprocess_data(DATASET_CSV_PATH, test_size=0.2)
-
-    if train_df is None or val_df is None:
-        logging.error("Errore nel caricamento dei dati. Training interrotto.")
-        return
-
-    # Rinomina 'etichetta' in 'label' come atteso da HuggingFace Trainer
-    train_df = train_df.rename(columns={'etichetta': 'label'})
-    val_df = val_df.rename(columns={'etichetta': 'label'})
-    
-    # Seleziona solo le colonne necessarie
-    train_df = train_df[['testo', 'label']]
-    val_df = val_df[['testo', 'label']]
-
-    train_dataset = Dataset.from_pandas(train_df)
-    val_dataset = Dataset.from_pandas(val_df)
-    
-    logging.info(f"Dataset di training: {len(train_dataset)} campioni.")
-    logging.info(f"Dataset di validazione: {len(val_dataset)} campioni.")
-
-    # 2. Caricamento Tokenizer e Modello
-    logging.info(f"Caricamento tokenizer e modello pre-addestrato: {MODEL_NAME}")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2) # 2 labels: metafora (1), non-metafora (0)
-    model.to(device) # Sposta il modello sulla GPU se disponibile
-
-    # 3. Tokenizzazione dei Dati
-    logging.info("Tokenizzazione dei dataset...")
-    train_tokenized_dataset = train_dataset.map(lambda x: preprocess_function(x, tokenizer), batched=True)
-    val_tokenized_dataset = val_dataset.map(lambda x: preprocess_function(x, tokenizer), batched=True)
-
-    # Rimuovi colonne non necessarie per il training e formatta per PyTorch
-    train_tokenized_dataset = train_tokenized_dataset.remove_columns(["testo", "__index_level_0__"] if "__index_level_0__" in train_tokenized_dataset.column_names else ["testo"])
-    val_tokenized_dataset = val_tokenized_dataset.remove_columns(["testo", "__index_level_0__"] if "__index_level_0__" in val_tokenized_dataset.column_names else ["testo"])
-    
-    train_tokenized_dataset.set_format("torch")
-    val_tokenized_dataset.set_format("torch")
-
-    # 4. Impostazione Argomenti di Training
-    logging.info("Configurazione degli argomenti di training...")
-    training_args = TrainingArguments(
-        output_dir=OUTPUT_DIR,
-        num_train_epochs=NUM_EPOCHS,
-        per_device_train_batch_size=BATCH_SIZE,
-        per_device_eval_batch_size=BATCH_SIZE,
-        learning_rate=LEARNING_RATE,
-        weight_decay=0.01,
-        evaluation_strategy="epoch",      # Valuta alla fine di ogni epoca
-        save_strategy="epoch",            # Salva un checkpoint alla fine di ogni epoca
-        load_best_model_at_end=True,      # Carica il miglior modello alla fine del training
-        logging_dir=LOGGING_DIR,
-        logging_steps=10,                 # Logga ogni 10 step
-        report_to="tensorboard",          # Opzionale: per visualizzare log con TensorBoard
-        fp16=torch.cuda.is_available(),   # Usa precisione mista se GPU disponibile e supportata
-        # no_cuda= (device.type == 'cpu') # Decommenta se vuoi forzare CPU
+def tokenize_function(examples, tokenizer):
+    """
+    Tokenizzazione dei testi con padding e truncation a max_length=128.
+    """
+    return tokenizer(
+        examples['testo'],
+        padding='max_length',
+        truncation=True,
+        max_length=128
     )
 
-    # 5. Creazione del Trainer
+def train_model(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    model_name: str = "Musixmatch/umberto-wikipedia-uncased-v1",
+    output_dir: str = "cami_model",
+    num_epochs: int = 3,
+    batch_size: int = 8,
+    learning_rate: float = 2e-5
+):
+    """
+    Funzione principale per il fine-tuning del modello.
+    
+    Args:
+        train_df (pd.DataFrame): DataFrame di training con colonne ['testo', 'etichetta', ...].
+        test_df (pd.DataFrame): DataFrame di test con colonne ['testo', 'etichetta', ...].
+        model_name (str): Identificatore del modello pre-addestrato su HuggingFace.
+        output_dir (str): Cartella in cui salvare i checkpoint e il modello finale.
+        num_epochs (int): Numero di epoche di training.
+        batch_size (int): Dimensione del batch per train/validation.
+        learning_rate (float): Learning rate per l'ottimizzazione.
+    """
+    # Controlla se GPU è disponibile
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device usato per l'addestramento: {device}")
+    
+    # Carica tokenizer e modello
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
+    model.to(device)
+    
+    # Crea HuggingFace Dataset da DataFrame
+    train_ds = Dataset.from_pandas(train_df.reset_index(drop=True))
+    test_ds = Dataset.from_pandas(test_df.reset_index(drop=True))
+    
+    # Mantieni solo le colonne necessarie
+    train_ds = train_ds.map(lambda examples: {'etichetta': examples['etichetta']}, remove_columns=[c for c in train_ds.column_names if c not in ['testo', 'etichetta']])
+    test_ds = test_ds.map(lambda examples: {'etichetta': examples['etichetta']}, remove_columns=[c for c in test_ds.column_names if c not in ['testo', 'etichetta']])
+    
+    # Tokenizzazione in batch
+    tokenized_train = train_ds.map(lambda x: tokenize_function(x, tokenizer), batched=True)
+    tokenized_test = test_ds.map(lambda x: tokenize_function(x, tokenizer), batched=True)
+    
+    # Specifica le colonne di input per Trainer
+    tokenized_train = tokenized_train.rename_column("etichetta", "labels")
+    tokenized_test = tokenized_test.rename_column("etichetta", "labels")
+    tokenized_train.set_format("torch", columns=["input_ids", "attention_mask", "labels"])
+    tokenized_test.set_format("torch", columns=["input_ids", "attention_mask", "labels"])
+    
+    # Definisci gli argomenti di training
+    training_args = TrainingArguments(
+        output_dir=output_dir,
+        num_train_epochs=num_epochs,
+        per_device_train_batch_size=batch_size,
+        per_device_eval_batch_size=batch_size,
+        learning_rate=learning_rate,
+        evaluation_strategy="epoch",
+        save_strategy="epoch",
+        logging_strategy="epoch",
+        load_best_model_at_end=True,
+        metric_for_best_model="f1",
+        greater_is_better=True,
+        save_total_limit=3
+    )
+    
+    # Instanzia il Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=train_tokenized_dataset,
-        eval_dataset=val_tokenized_dataset,
-        tokenizer=tokenizer,
+        train_dataset=tokenized_train,
+        eval_dataset=tokenized_test,
         compute_metrics=compute_metrics
     )
-
-    # 6. Training
-    logging.info("Avvio del training...")
-    try:
-        trainer.train()
-        logging.info("Training completato.")
-    except Exception as e:
-        logging.error(f"Errore durante il training: {e}")
-        # Potresti voler salvare lo stato attuale qui se possibile
-        raise
-
-    # 7. Salvataggio del Modello Fine-tunato
-    logging.info(f"Salvataggio del modello fine-tunato in {OUTPUT_DIR}...")
-    trainer.save_model(OUTPUT_DIR)
-    tokenizer.save_pretrained(OUTPUT_DIR) # Salva anche il tokenizer per coerenza
-    logging.info("Modello e tokenizer salvati.")
-
-if __name__ == '__main__':
-    # Crea le directory di output se non esistono
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    os.makedirs(LOGGING_DIR, exist_ok=True)
     
-    # Per Colab: Assicurati che la GPU sia attiva!
-    # Runtime -> Change runtime type -> GPU
+    # Avvia il training
+    trainer.train()
     
-    train()
+    # Salva il modello fine-tunato
+    os.makedirs(output_dir, exist_ok=True)
+    trainer.save_model(output_dir)
+    tokenizer.save_pretrained(output_dir)
+    print(f"Modello fine-tunato salvato in '{output_dir}'.")
+
+def main():
+    """
+    Punto di ingresso se eseguito come script.
+    Esegue: load_and_prepare_data -> train_model
+    """
+    # ATTENZIONE: in Colab assicurarsi di aver caricato CAMI_dataset_v2.csv nella working directory
+    train_df, test_df = data_utils.load_and_prepare_data(csv_path='CAMI_dataset_v2.csv')
+    train_model(train_df, test_df)
+
+if __name__ == "__main__":
+    # Eventuali installazioni necessarie:
+    # !pip install transformers datasets scikit-learn
+    main()

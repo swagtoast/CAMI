@@ -1,235 +1,302 @@
+"""
+predict.py
+
+Script per l'inferenza su nuovi testi in italiano:
+- Legge tutti i file .txt da una cartella (es. data/nuovi_testi/)
+- Divide i testi in frasi (nltk.sent_tokenize o spaCy)
+- Per ogni frase:
+    - Tokenizza e predice la probabilità di metafora con il modello fine-tunato
+    - Se prob > 0.65: etichetta 'metafora'
+      Se prob < 0.35: etichetta 'non metafora'
+      Se 0.35 <= prob <= 0.65: richiede annotazione manuale (input())
+    - Salva annotazioni manuali in manual_annotations.csv
+    - Quando si raggiungono 75 annotazioni manuali, si autopettra addestramento aggiungendo i nuovi esempi
+- Per le frasi etichettate come metafora:
+    - Estrae argomento e veicolo come la coppia di sostantivi con similarità semantica minima
+    - Calcola distanza semantica (usando semantics.distanza_semantica)
+    - Estrae embedding di argomento e veicolo (modello embedding separato) e li riduce a 2D (PCA)
+    - Visualizza scatterplot dei vettori 2D
+    - Visualizza heatmap dell'attenzione (ultima layer, media over heads) sui token
+- Calcola indice di figuralità per ciascun file:
+    indice = (num_metafore / 1000) * (20 / avg_num_parole_frase)
+- Salva risultati finali in risultati_inferenza.csv con colonne:
+    file_name, indice_figuralita, conteggio_frasi, conteggio_metafore
+"""
+
 import os
-import glob
-import nltk # Per tokenizzazione in frasi
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import csv
 import pandas as pd
-from tqdm import tqdm
-import logging
-# import semantics # Opzionale: per analisi semantica delle metafore trovate, se argomento/veicolo sono disponibili
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModel
+import nltk
+from semantics import distanza_semantica, stima_concretezza
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+import warnings
 
-# Impostazioni di logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# In Colab, assicurarsi di eseguire:
+# !pip install transformers sklearn nltk spacy
+# !python -m spacy download it_core_news_sm
 
-# Configurazioni
-MODEL_PATH = "./cami_model_finetuned"  # Path al modello salvato
-NEW_TEXTS_DIR = "data/nuovi_testi/"    # Directory con i file .txt da analizzare
-OUTPUT_CSV_PATH = "figurality_results.csv" # File CSV per salvare i risultati
-MAX_LENGTH = 128 # Stessa usata nel training
-BATCH_SIZE_INFERENCE = 16 # Batch size per l'inferenza
+# Import spaCy per estrazione dei sostantivi
+import spacy
+nlp = spacy.load("it_core_news_sm")
 
-# Download risorse NLTK (da eseguire una volta se non già fatto)
-# In Colab:
-# import nltk
-# nltk.download('punkt')
-# nltk.download('wordnet') # Se si usa semantics.py
-# nltk.download('omw-1.4') # Se si usa semantics.py
+# Download risorse NLTK per sentence tokenizer
+nltk.download('punkt')
 
-def split_into_sentences(text_content: str) -> list[str]:
-    """Suddivide il testo in frasi usando NLTK."""
-    try:
-        # Assicurati che nltk.download('punkt') sia stato eseguito
-        sentences = nltk.sent_tokenize(text_content, language='italian')
-        return [s.strip() for s in sentences if s.strip()] # Rimuovi frasi vuote
-    except Exception as e:
-        logging.error(f"Errore nella tokenizzazione delle frasi (hai scaricato 'punkt'?): {e}")
-        return []
-
-def predict_metaphors_in_batch(sentences: list[str], tokenizer, model, device) -> list[int]:
-    """Predice etichette (0 o 1) per una lista di frasi in batch."""
-    if not sentences:
-        return []
-    
-    all_predictions = []
-    model.eval() # Modalità valutazione
-    with torch.no_grad():
-        for i in range(0, len(sentences), BATCH_SIZE_INFERENCE):
-            batch_sentences = sentences[i:i+BATCH_SIZE_INFERENCE]
-            inputs = tokenizer(
-                batch_sentences, 
-                return_tensors="pt", 
-                padding=True, 
-                truncation=True, 
-                max_length=MAX_LENGTH
-            )
-            inputs = {k: v.to(device) for k, v in inputs.items()}
-            
-            outputs = model(**inputs)
-            logits = outputs.logits
-            predictions = torch.argmax(logits, dim=-1)
-            all_predictions.extend(predictions.cpu().numpy().tolist())
-    return all_predictions
-
-def calculate_figurality_index(num_metaphors: int, num_sentences: int, avg_words_per_sentence: float) -> float:
+def load_model(model_dir='cami_model'):
     """
-    Calcola l'indice di figuralità.
-    Formula: (metafore / 1000 frasi) * (20 / numero_medio_di_parole_in_una_frase_del_testo_in_esame)
+    Carica il tokenizer, il classificatore e il modello base per embedding.
     """
-    if num_sentences == 0 or avg_words_per_sentence == 0:
-        return 0.0
-    
-    metaphors_per_1000_sentences = (num_metaphors / num_sentences) * 1000
-    
-    # Il fattore 20 è un termine di normalizzazione, come specificato nella richiesta.
-    # Potrebbe essere basato su una lunghezza media di frase di riferimento (es. 20 parole).
-    length_factor = 20 / avg_words_per_sentence 
-    
-    figurality_idx = (metaphors_per_1000_sentences / 1000) * length_factor # Diviso 1000 per portarlo a %
-    # La formula originale è (metafore/1000 frasi) * (20 / media_parole)
-    # Se vogliamo un indice che può essere > 1, usiamo:
-    # figurality_idx = metaphors_per_1000_sentences * length_factor
-    # Se vogliamo un indice che sia più simile a una "percentuale di metafore per 1000 frasi, normalizzata per lunghezza":
-    # figurality_idx = (num_metaphors / num_sentences) * length_factor 
-    # L'interpretazione della richiesta "metafore/1000 frasi" può essere (num_metaphors / num_sentences) * 1000
-    # oppure (num_metaphors / 1000) se num_sentences è vicino a 1000.
-    # Assumendo la prima interpretazione:
-    
-    # ((num_metaphors / num_sentences) * 1000) * (20 / avg_words_per_sentence)
-    # Questa formula produce numeri che possono essere grandi.
-    # Se "metafore/1000 frasi" significa "densità di metafore per 1000 frasi",
-    # allora (num_metaphors / num_sentences) è la densità per frase.
-    # Per 1000 frasi, è (num_metaphors / num_sentences) * 1000.
-    # figurality_idx = ((num_metaphors / num_sentences) * 1000) * (20 / avg_words_per_sentence)
-    # Questo è un valore, non una percentuale. Se si vuole come "percentuale di metafore per 1000 frasi normalizzato"
-    # si potrebbe dividere ulteriormente.
-    # Manteniamo la formula come interpretata:
-    fig_index = (num_metaphors / num_sentences * 1000) * (20 / avg_words_per_sentence) if num_sentences > 0 and avg_words_per_sentence > 0 else 0.0
-    return fig_index
-
-
-def main_predict():
-    """Funzione principale per l'inferenza su nuovi testi."""
-    logging.info("Avvio del processo di inferenza su nuovi testi...")
-
-    # 0. Download NLTK 'punkt' se non già fatto (per Colab/primo avvio)
-    try:
-        nltk.data.find('tokenizers/punkt')
-    except nltk.downloader.DownloadError:
-        logging.info("Download del tokenizer 'punkt' di NLTK...")
-        nltk.download('punkt')
-    
-    # 1. Controlla disponibilità GPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logging.info(f"Utilizzo del dispositivo: {device}")
+    tokenizer = AutoTokenizer.from_pretrained(model_dir)
+    classifier = AutoModelForSequenceClassification.from_pretrained(model_dir, output_attentions=True)
+    classifier.to(device)
+    classifier.eval()
+    # Modello separate per embedding (solo base, senza testa di classificazione)
+    embed_model = AutoModel.from_pretrained("Musixmatch/umberto-wikipedia-uncased-v1")
+    embed_model.to(device)
+    embed_model.eval()
+    return tokenizer, classifier, embed_model, device
 
-    # 2. Caricamento Tokenizer e Modello Fine-tunato
-    logging.info(f"Caricamento tokenizer e modello da {MODEL_PATH}...")
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-        model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
-        model.to(device)
-    except Exception as e:
-        logging.error(f"Errore nel caricamento del modello o tokenizer: {e}")
-        return
+def get_sentence_embedding(embed_model, tokenizer, sentence, device):
+    """
+    Restituisce embedding medio (mean pooling) di un'intera frase.
+    """
+    inputs = tokenizer(sentence, return_tensors='pt', padding=True, truncation=True, max_length=128).to(device)
+    with torch.no_grad():
+        outputs = embed_model(**inputs)
+        last_hidden = outputs.last_hidden_state  # [1, seq_len, hidden_size]
+        mask = inputs['attention_mask'].unsqueeze(-1)  # [1, seq_len, 1]
+        masked_hidden = last_hidden * mask  # maschera i padding
+        sum_hidden = masked_hidden.sum(dim=1)  # [1, hidden_size]
+        lengths = mask.sum(dim=1)  # [1, 1]
+        return (sum_hidden / lengths).cpu().numpy().flatten()  # vettore 1D di dimensione hidden_size
 
-    # 3. Trova tutti i file .txt nella directory specificata
-    text_files = glob.glob(os.path.join(NEW_TEXTS_DIR, "*.txt"))
-    if not text_files:
-        logging.warning(f"Nessun file .txt trovato in {NEW_TEXTS_DIR}. Processo terminato.")
-        return
+def get_word_embedding(embed_model, tokenizer, word, device):
+    """
+    Restituisce embedding medio (mean pooling) di una singola parola (fuori contesto).
+    """
+    inputs = tokenizer(word, return_tensors='pt', padding=True, truncation=True, max_length=32).to(device)
+    with torch.no_grad():
+        outputs = embed_model(**inputs)
+        last_hidden = outputs.last_hidden_state  # [1, seq_len, hidden_size]
+        mask = inputs['attention_mask'].unsqueeze(-1)
+        masked_hidden = last_hidden * mask
+        sum_hidden = masked_hidden.sum(dim=1)
+        lengths = mask.sum(dim=1)
+        return (sum_hidden / lengths).cpu().numpy().flatten()
+
+def extract_noun_pairs(sentence):
+    """
+    Estrae dalla frase tutti i possibili sostantivi (lemma) usando spaCy.
+    Restituisce la lista dei lemma dei sostantivi.
+    """
+    doc = nlp(sentence)
+    nouns = [token.lemma_ for token in doc if token.pos_ == 'NOUN']
+    return nouns
+
+def select_arg_veh(nouns):
+    """
+    Dato l'elenco di sostantivi, calcola per ogni coppia la similarità semantica
+    e restituisce la coppia (argomento, veicolo) con similarità minima.
+    Se non ci sono almeno 2 sostantivi, restituisce (None, None).
+    """
+    if len(nouns) < 2:
+        return None, None
+    best_pair = (None, None)
+    min_sim = 1.0  # più bassa è la similarità, più probabile che sia metafora
+    for i in range(len(nouns)):
+        for j in range(i + 1, len(nouns)):
+            w1, w2 = nouns[i], nouns[j]
+            sim = distanza_semantica(w1, w2)
+            if sim is None:
+                sim = 0.0
+            if sim < min_sim:
+                min_sim = sim
+                best_pair = (w1, w2)
+    return best_pair
+
+def plot_attention_heatmap(tokens, attention_matrix):
+    """
+    Visualizza una heatmap dell'attenzione (seq_len x seq_len) per una data sequenza di token.
+    """
+    plt.figure(figsize=(8, 6))
+    plt.imshow(attention_matrix, interpolation='nearest', cmap='viridis')
+    plt.xticks(range(len(tokens)), tokens, rotation=90, fontsize=6)
+    plt.yticks(range(len(tokens)), tokens, fontsize=6)
+    plt.colorbar()
+    plt.title("Heatmap dell'attenzione (ultimo layer, media over heads)")
+    plt.tight_layout()
+    plt.show()
+
+def infer_on_folder(
+    input_folder='data/nuovi_testi/',
+    results_csv='risultati_inferenza.csv',
+    manual_csv='manual_annotations.csv',
+    retrain_threshold=75
+):
+    """
+    Esegue l'inferenza su tutti i file .txt nella cartella input_folder.
+    Salva i risultati aggregati in results_csv e le annotazioni manuali in manual_csv.
+    Quando manual_csv raggiunge retrain_threshold righe, lancia il ri-addestramento.
+    """
+    # Carica modelli e tokenizer
+    tokenizer, classifier, embed_model, device = load_model()
     
-    logging.info(f"Trovati {len(text_files)} file .txt da analizzare.")
-
-    results = []
-
-    # 4. Processa ciascun file
-    for txt_file_path in tqdm(text_files, desc="Processing text files"):
-        filename = os.path.basename(txt_file_path)
-        logging.info(f"\n--- Analisi del file: {filename} ---")
+    # Se non esistono, crea i file CSV vuoti con header
+    if not os.path.exists(results_csv):
+        with open(results_csv, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['file_name', 'indice_figuralita', 'conteggio_frasi', 'conteggio_metafore'])
+    if not os.path.exists(manual_csv):
+        with open(manual_csv, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['testo', 'etichetta', 'probabilita'])
+    
+    # Itera sui file .txt
+    for filename in os.listdir(input_folder):
+        if not filename.lower().endswith('.txt'):
+            continue
+        filepath = os.path.join(input_folder, filename)
+        with open(filepath, 'r', encoding='utf-8') as f:
+            text = f.read().strip()
         
-        try:
-            with open(txt_file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except Exception as e:
-            logging.error(f"Errore nella lettura del file {filename}: {e}")
-            results.append({
-                'nome_testo': filename, 'indice_figuralita': 0,
-                'conteggio_frasi': 0, 'conteggio_metafore': 0,
-                'media_parole_frase': 0
-            })
+        if not text:
+            # Se il testo è vuoto, indice di figuralità = 0
+            with open(results_csv, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([filename, 0.0, 0, 0])
             continue
-
-        if not content.strip():
-            logging.warning(f"Il file {filename} è vuoto o contiene solo spazi bianchi.")
-            results.append({
-                'nome_testo': filename, 'indice_figuralita': 0,
-                'conteggio_frasi': 0, 'conteggio_metafore': 0,
-                'media_parole_frase': 0
-            })
-            continue
-
-        # Suddividi in frasi
-        sentences = split_into_sentences(content)
+        
+        # Suddividi in frasi (NLTK)
+        sentences = nltk.sent_tokenize(text, language='italian')
         num_sentences = len(sentences)
-
-        if num_sentences == 0:
-            logging.warning(f"Nessuna frase trovata in {filename} dopo la tokenizzazione.")
-            results.append({
-                'nome_testo': filename, 'indice_figuralita': 0,
-                'conteggio_frasi': 0, 'conteggio_metafore': 0,
-                'media_parole_frase': 0
-            })
-            continue
+        num_metaphors = 0
+        total_word_count = 0
+        
+        for sentence in sentences:
+            total_word_count += len(sentence.split())
+            # Tokenizza e predici
+            inputs = tokenizer(sentence, return_tensors='pt', padding=True, truncation=True, max_length=128).to(device)
+            with torch.no_grad():
+                outputs = classifier(**inputs)
+                logits = outputs.logits
+                probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
+                prob_meta = probs[1]  # probabilità di "metafora"
             
-        logging.info(f"Numero di frasi estratte: {num_sentences}")
+            if prob_meta > 0.65:
+                label = 1  # Metafora
+            elif prob_meta < 0.35:
+                label = 0  # Non metafora
+            else:
+                # Caso di incertezza: richiede annotazione manuale
+                print(f"\nFrase incerta (probabilità={prob_meta:.2f}):")
+                print(f"\"{sentence}\"")
+                ans = input("La frase è metaforica? (y/n): ").strip().lower()
+                if ans == 'y':
+                    label = 1
+                else:
+                    label = 0
+                # Salva annotazione manuale
+                with open(manual_csv, 'a', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([sentence, label, f"{prob_meta:.4f}"])
+                
+                # Controlla se raggiunto threshold per retraining
+                current_manual = pd.read_csv(manual_csv, encoding='utf-8')
+                if len(current_manual) >= retrain_threshold:
+                    print("\n=== Soglia di annotazioni manuali raggiunta: avvio ri-addestramento ===")
+                    retrain_model(manual_csv)
+            
+            if label == 1:
+                num_metaphors += 1
+                # Estrai argomento e veicolo
+                nouns = extract_noun_pairs(sentence)
+                arg, veh = select_arg_veh(nouns)
+                if arg and veh:
+                    sim = distanza_semantica(arg, veh)
+                    concretezza_arg = stima_concretezza(arg)
+                    concretezza_veh = stima_concretezza(veh)
+                    print(f"--> Metafora rilevata: \"{sentence}\"")
+                    print(f"    Argomento: {arg}, Veicolo: {veh}, Similarità sem.: {sim}")
+                    print(f"    Concretezza: {arg}:{concretezza_arg}, {veh}:{concretezza_veh}")
+                    
+                    # Calcola embedding dei due termini (fuori contesto)
+                    vec_arg = get_word_embedding(embed_model, tokenizer, arg, device)
+                    vec_veh = get_word_embedding(embed_model, tokenizer, veh, device)
+                    # Riduci dimensione a 2D con PCA
+                    pca = PCA(n_components=2)
+                    pts_2d = pca.fit_transform([vec_arg, vec_veh])
+                    # Scatter plot
+                    plt.figure(figsize=(4, 4))
+                    plt.scatter(pts_2d[0, 0], pts_2d[0, 1], label=f"Arg: {arg}")
+                    plt.scatter(pts_2d[1, 0], pts_2d[1, 1], label=f"Veh: {veh}")
+                    plt.legend()
+                    plt.title("Rappresentazione 2D Argomento/Veicolo")
+                    plt.tight_layout()
+                    plt.show()
+                    
+                    # Matrice di attenzione (ultimo layer, media over heads)
+                    inputs_att = tokenizer(sentence, return_tensors='pt', padding=True, truncation=True, max_length=128).to(device)
+                    with torch.no_grad():
+                        out_att = classifier(**inputs_att, output_attentions=True)
+                        attentions = out_att.attentions  # tuple di length=num_layers
+                        last_layer = attentions[-1][0]  # [num_heads, seq_len, seq_len]
+                        avg_att = last_layer.mean(dim=0).cpu().numpy()  # [seq_len, seq_len]
+                    tokens = tokenizer.convert_ids_to_tokens(inputs_att['input_ids'][0])
+                    plot_attention_heatmap(tokens, avg_att)
+                else:
+                    print(f"--> Metafora rilevata ma non sono stati estratti argomento/veicolo (frase: \"{sentence}\")")
+        
+        # Calcola indice di figuralità: (num_metaphors / 1000) * (20 / avg_num_parole_frase)
+        avg_words = total_word_count / num_sentences if num_sentences > 0 else 0
+        if avg_words > 0:
+            indice_fig = (num_metaphors / 1000) * (20 / avg_words)
+        else:
+            indice_fig = 0.0
+        
+        # Salva i risultati per il file
+        with open(results_csv, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([filename, f"{indice_fig:.4f}", num_sentences, num_metaphors])
+        
+        print(f"\nFile: {filename}")
+        print(f"  Totale frasi: {num_sentences}, Metafore: {num_metaphors}, Indice: {indice_fig:.4f}\n")
+    print("=== Inferenza completata ===")
 
-        # Predici metafore
-        predictions = predict_metaphors_in_batch(sentences, tokenizer, model, device)
-        num_metaphors = sum(predictions) # predictions contiene 0 o 1
-        logging.info(f"Numero di metafore identificate: {num_metaphors}")
+def retrain_model(manual_csv, model_dir='cami_model', epochs=1):
+    """
+    Esegue il ri-addestramento automatico aggiungendo le annotazioni manuali
+    al training set originale e salva il nuovo modello in cami_model/.
+    """
+    import data_utils
+    import train_model
+    # Leggi train.csv esistente
+    train_original = pd.read_csv('train.csv', encoding='utf-8')
+    # Leggi test.csv per mantenere invariato il test set
+    test_df = pd.read_csv('test.csv', encoding='utf-8')
+    # Leggi annotazioni manuali
+    manual_df = pd.read_csv(manual_csv, encoding='utf-8')
+    # Prepara DataFrame manual con colonne minime: testo, etichetta
+    manual_df = manual_df[['testo', 'etichetta']].copy()
+    manual_df['argomento'] = None
+    manual_df['veicolo'] = None
+    # Unisci con il training originale
+    train_combined = pd.concat([train_original, manual_df], ignore_index=True)
+    # Chiamata a train_model con numero di epoche ridotto
+    print("Avvio ri-addestramento con dataset esteso...")
+    train_model.train_model(
+        train_df=train_combined,
+        test_df=test_df,
+        output_dir=model_dir,
+        num_epochs=epochs
+    )
+    print("Ri-addestramento completato. Reset manual_annotations.csv a zero.")
+    # Svuota file annotazioni manuali
+    open(manual_csv, 'w', encoding='utf-8').close()
 
-        # Calcola numero medio di parole per frase
-        total_words = sum(len(s.split()) for s in sentences)
-        avg_words_per_sentence = total_words / num_sentences if num_sentences > 0 else 0
-        logging.info(f"Numero medio di parole per frase: {avg_words_per_sentence:.2f}")
-
-        # Calcola indice di figuralità
-        fig_index = calculate_figurality_index(num_metaphors, num_sentences, avg_words_per_sentence)
-        logging.info(f"Indice di Figuralità Calcolato: {fig_index:.4f}")
-
-        results.append({
-            'nome_testo': filename,
-            'indice_figuralita': fig_index,
-            'conteggio_frasi': num_sentences,
-            'conteggio_metafore': num_metaphors,
-            'media_parole_frase': round(avg_words_per_sentence, 2)
-        })
-
-        # Opzionale: Analisi semantica delle frasi metaforiche
-        # Questa parte richiede che tu abbia un modo per estrarre argomento/veicolo
-        # dalle frasi identificate come metaforiche. Questo è un compito complesso (NER + Relation Extraction)
-        # che va oltre la semplice classificazione. Se il dataset CAMI avesse queste info,
-        # si potrebbero usare per le frasi del dataset. Per testi nuovi, è più difficile.
-        # Esempio concettuale se avessi arg/vec:
-        # for i, (sentence, pred) in enumerate(zip(sentences, predictions)):
-        #     if pred == 1: # Se è una metafora
-        #         print(f"Metafora trovata: {sentence}")
-        #         # arg, vec = estrai_arg_vec(sentence) # Funzione ipotetica
-        #         # if arg and vec and 'semantics' in globals(): # Controlla se il modulo semantics è importato
-        #         #     dist = semantics.distanza_semantica(arg, vec)
-        #         #     conc_arg = semantics.stima_concretezza(arg)
-        #         #     conc_vec = semantics.stima_concretezza(vec)
-        #         #     print(f"  Arg: {arg} (Conc: {conc_arg}), Vec: {vec} (Conc: {conc_vec}), Dist: {dist}")
-
-    # 5. Salva i risultati in un CSV
-    if results:
-        results_df = pd.DataFrame(results)
-        try:
-            results_df.to_csv(OUTPUT_CSV_PATH, index=False, encoding='utf-8')
-            logging.info(f"Risultati dell'inferenza salvati in: {OUTPUT_CSV_PATH}")
-        except Exception as e:
-            logging.error(f"Errore nel salvataggio del CSV dei risultati: {e}")
-    else:
-        logging.info("Nessun risultato da salvare.")
-
-if __name__ == '__main__':
-    # Crea la directory dei testi di input se non esiste
-    os.makedirs(NEW_TEXTS_DIR, exist_ok=True)
-    # Aggiungi qui file .txt di esempio in data/nuovi_testi/ per testare
-    # Esempio:
-    # with open(os.path.join(NEW_TEXTS_DIR, "esempio_testo1.txt"), "w", encoding="utf-8") as f:
-    #     f.write("La vita è un lungo viaggio pieno di sorprese. Il tempo vola quando ci si diverte. Quel politico è una vecchia volpe.")
-    # with open(os.path.join(NEW_TEXTS_DIR, "esempio_testo2.txt"), "w", encoding="utf-8") as f:
-    #     f.write("Il cielo oggi è sereno. Il gatto dorme sulla sedia. Mi piace leggere libri.")
-    
-    main_predict()
+if __name__ == "__main__":
+    # Esempio di utilizzo: infer_on_folder('data/nuovi_testi/')
+    infer_on_folder()
