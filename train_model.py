@@ -84,7 +84,7 @@ def train_model(
         
     from datasets import Dataset
 
-    # converte il DataFrame in dict di liste puramente Python/NumPy
+    # 1. Creazione del Dataset da dizionario di liste (evita ValueError di NumPy 2.x)
     train_dict = {
         'testo':     train_df['testo'].astype(str).tolist(),
         'etichetta': train_df['etichetta'].tolist()
@@ -97,21 +97,15 @@ def train_model(
     train_ds = Dataset.from_dict(train_dict)
     test_ds  = Dataset.from_dict(test_dict)
 
-    # Rinomina le colonne per la compatibilità con Trainer
+    # 2. Rinominare subito la colonna "etichetta" in "labels"
     train_ds = train_ds.rename_column("etichetta", "labels")
     test_ds  = test_ds.rename_column("etichetta", "labels")
-    
-    # Mantieni solo le colonne necessarie
-    train_ds = train_ds.map(lambda examples: {'etichetta': examples['etichetta']}, remove_columns=[c for c in train_ds.column_names if c not in ['testo', 'etichetta']])
-    test_ds = test_ds.map(lambda examples: {'etichetta': examples['etichetta']}, remove_columns=[c for c in test_ds.column_names if c not in ['testo', 'etichetta']])
-    
-    # Tokenizzazione in batch
+
+    # 3. Tokenizzazione in batch (padding + truncation)
     tokenized_train = train_ds.map(lambda x: tokenize_function(x, tokenizer), batched=True)
-    tokenized_test = test_ds.map(lambda x: tokenize_function(x, tokenizer), batched=True)
-    
-    # Specifica le colonne di input per Trainer
-    tokenized_train = tokenized_train.rename_column("etichetta", "labels")
-    tokenized_test = tokenized_test.rename_column("etichetta", "labels")
+    tokenized_test  = test_ds.map(lambda x: tokenize_function(x, tokenizer), batched=True)
+
+    # 4. Impostare il formato "torch" con le colonne corrette
     tokenized_train.set_format("torch", columns=["input_ids", "attention_mask", "labels"])
     tokenized_test.set_format("torch", columns=["input_ids", "attention_mask", "labels"])
     
