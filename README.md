@@ -19,7 +19,7 @@ Questo progetto fornisce un sistema completo per:
 ├── CAMI_demo.ipynb          # Jupyter Notebook che contiene una demo del software (solo classificazione metafora/letterale)
 ├── data/                    # Cartella che contiene CAMI_dataset_v2.csv e input di inferenza
 │   ├── CAMI_dataset_v2.csv  # Dataset di training
-│   └── nuovi_testi/         # Qui mettere i file .txt per l’inferenza 
+│   └── nuovi_testi/         # Contiene i file .txt per l’inferenza 
 ├── data_utils.py            # Funzioni per caricamento e preparazione dati
 ├── train_model.py           # Script di fine-tuning del modello
 ├── evaluate_model.py        # Script di valutazione su test set
