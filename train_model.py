@@ -81,10 +81,25 @@ def train_model(
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
     model.to(device)
-    
-    # Crea HuggingFace Dataset da DataFrame
-    train_ds = Dataset.from_pandas(train_df.reset_index(drop=True))
-    test_ds = Dataset.from_pandas(test_df.reset_index(drop=True))
+        
+    from datasets import Dataset
+
+    # converte il DataFrame in dict di liste puramente Python/NumPy
+    train_dict = {
+        'testo':     train_df['testo'].astype(str).tolist(),
+        'etichetta': train_df['etichetta'].tolist()
+    }
+    test_dict = {
+        'testo':     test_df['testo'].astype(str).tolist(),
+        'etichetta': test_df['etichetta'].tolist()
+    }
+
+    train_ds = Dataset.from_dict(train_dict)
+    test_ds  = Dataset.from_dict(test_dict)
+
+    # Rinomina le colonne per la compatibilità con Trainer
+    train_ds = train_ds.rename_column("etichetta", "labels")
+    test_ds  = test_ds.rename_column("etichetta", "labels")
     
     # Mantieni solo le colonne necessarie
     train_ds = train_ds.map(lambda examples: {'etichetta': examples['etichetta']}, remove_columns=[c for c in train_ds.column_names if c not in ['testo', 'etichetta']])
