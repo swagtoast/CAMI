@@ -1,0 +1,18 @@
+# Filename: .gitignore
+
+# Ambiente virtuale
+venv/
+
+# Cache di Python
+__pycache__/
+*.pyc
+
+# File di sistema del Mac
+.DS_Store
+
+# Cartelle di output e log
+/models/
+/logs/
+
+# File di cache di Hugging Face e Jupyter
+.ipynb_checkpoints/

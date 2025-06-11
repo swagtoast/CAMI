@@ -1,0 +1,15 @@
+# Filename: requirements.txt
+
+# Core ML/NLP libraries
+torch
+transformers
+datasets
+evaluate
+
+# Data handling and utilities
+pandas
+scikit-learn
+
+# Per lavorare con i notebook (opzionale ma consigliato)
+jupyter
+ipywidgets
