@@ -6,6 +6,7 @@ transformers
 datasets
 evaluate
 nltk
+seqeval
 
 # Data handling and utilities
 pandas

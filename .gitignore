@@ -16,3 +16,6 @@ __pycache__/
 
 # File di cache di Hugging Face e Jupyter
 .ipynb_checkpoints/
+
+# File di debug
+debug_ner_model.py
