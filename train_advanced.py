@@ -111,9 +111,14 @@ def main():
         train_dataset=tokenized_datasets["train"],
         eval_dataset=tokenized_datasets["test"],
         compute_metrics=compute_metrics,
+        tokenizer=tokenizer # Buona pratica passare anche il tokenizer
     )
 
     trainer.train()
+    
+    # SALVATAGGIO ESPLICITO DEL MODELLO E TOKENIZER ALLA FINE
+    print(f"Salvataggio del modello finale e del tokenizer in: {HP['output_dir']}")
+    trainer.save_model(HP["output_dir"])
     
     print("\n--- Valutazione Finale sul Modello Migliore ---")
     eval_results = trainer.evaluate()

@@ -5,6 +5,7 @@ torch
 transformers
 datasets
 evaluate
+nltk
 
 # Data handling and utilities
 pandas
