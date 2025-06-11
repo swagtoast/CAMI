@@ -84,45 +84,60 @@ class CAMI:
         }
         return report
 
-# --- BLOCCO DI ESECUZIONE PRINCIPALE (invariato) ---
+# Blocco principale per l'esecuzione dello script
+
 if __name__ == "__main__":
-    print("Avvio dell'applicazione CAMI...")
+    # Definiamo il percorso della cartella che contiene i testi da analizzare
+    CORPUS_DIR = os.path.join("data", "nuovi_testi")
+
+    print(f"Avvio dell'applicazione CAMI. Analisi dei file in: '{CORPUS_DIR}'")
+    
+    # Ci assicuriamo che la cartella esista, altrimenti la creiamo per l'utente
+    os.makedirs(CORPUS_DIR, exist_ok=True)
+    
+    # Carichiamo il nostro classificatore
     classifier = CAMI(model_path=MODEL_DIR)
     
-    print("\n--- Test 1: Previsione su singola frase ---")
-    test_sentence = "Il tempo è un ladro che ruba i ricordi."
-    result = classifier.predict(test_sentence)
-    print(f"Frase: '{test_sentence}'")
-    print(f"  -> Predizione: {result['label']} (Confidenza: {result['confidence']:.2%})")
-    
-    test_corpus_path = "corpus_di_prova.txt"
-    test_corpus_content = """
-    Il sole tramontava all'orizzonte, dipingendo il cielo di rosso. Era uno spettacolo magnifico.
-    Maria sentiva che il suo cuore era una prigione di ghiaccio, incapace di provare calore. 
-    Prese il telefono e chiamò sua madre. Parlarono per quasi un'ora. 
-    In quel mondo di squali, lui era solo un piccolo pesce. Doveva imparare a nuotare velocemente.
-    Il computer era un modello di ultima generazione, con un processore molto potente.
-    La vita, a volte, è un'arancia amara. Devi sbucciarla con pazienza per trovare la dolcezza.
-    Il treno arrivò in stazione puntuale, alle 18:30.
-    """
-    with open(test_corpus_path, 'w', encoding='utf-8') as f:
-        f.write(test_corpus_content)
-    
-    report = classifier.analyze_corpus(test_corpus_path)
-    
-    if "error" not in report:
-        print("\n--- Risultati dell'analisi del corpus ---")
-        print(f"File analizzato: {report['file_name']}")
-        print(f"Frasi totali: {report['total_sentences']}")
-        print(f"Frasi metaforiche trovate: {report['metaphorical_sentences']}")
-        print(f"Lunghezza media delle frasi: {report['average_sentence_length']:.2f} parole")
-        print(f"Densità di figuralità (metafore/totale): {report['figurality_density']:.2%}")
-        print(f"INDICE DI FIGURALITÀ: {report['figurality_index']:.4f}")
-        print("\nMetafore individuate:")
-        for metaphor in report['found_metaphors']:
-            print(f"  - '{metaphor['text']}' (Confidenza: {metaphor['confidence']:.1%})")
-        print("------------------------------------------")
+    # Troviamo tutti i file che terminano con .txt nella cartella specificata
+    try:
+        all_files = os.listdir(CORPUS_DIR)
+        text_files = [f for f in all_files if f.endswith(".txt")]
+    except FileNotFoundError:
+        print(f"ERRORE: La cartella '{CORPUS_DIR}' non è stata trovata.")
+        text_files = []
+
+    if not text_files:
+        print("\nNessun file .txt trovato nella cartella.")
+        print(f"Per favore, aggiungi uno o più file di testo (romanzi, articoli, ecc.) in '{CORPUS_DIR}' e riesegui lo script.")
     else:
-        print(f"Errore durante l'analisi: {report['error']}")
+        print(f"\nTrovati {len(text_files)} file di testo. Inizio analisi...")
         
-    os.remove(test_corpus_path)
+        # Iteriamo su ogni file di testo e lanciamo l'analisi
+        for filename in text_files:
+            full_path = os.path.join(CORPUS_DIR, filename)
+            report = classifier.analyze_corpus(full_path)
+            
+            # Stampiamo un report dettagliato per ogni file analizzato
+            if "error" not in report:
+                print("\n==========================================================")
+                print(f"RISULTATI PER: {report['file_name']}")
+                print("==========================================================")
+                print(f"Frasi totali: {report['total_sentences']}")
+                print(f"Frasi metaforiche trovate: {report['metaphorical_sentences']}")
+                print(f"Parole totali: {report['total_words']}")
+                print(f"Lunghezza media delle frasi: {report['average_sentence_length']:.2f} parole")
+                print(f"Densità di figuralità (metafore/totale): {report['figurality_density']:.2%}")
+                print(f"INDICE DI FIGURALITÀ: {report['figurality_index']:.4f}")
+                
+                # Stampiamo le prime 10 metafore trovate, se ce ne sono
+                if report['found_metaphors']:
+                    print("\nPrime 10 metafore individuate (ordinate per confidenza):")
+                    # Ordiniamo le metafore per confidenza decrescente prima di stamparle
+                    sorted_metaphors = sorted(report['found_metaphors'], key=lambda x: x['confidence'], reverse=True)
+                    for metaphor in sorted_metaphors[:10]:
+                        print(f"  - '{metaphor['text']}' (Confidenza: {metaphor['confidence']:.1%})")
+                print("==========================================================\n")
+            else:
+                print(f"\nERRORE durante l'analisi del file {filename}: {report['error']}")
+    
+    print("Processo terminato.")
