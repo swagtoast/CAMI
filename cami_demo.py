@@ -121,6 +121,6 @@ if __name__ == "__main__":
     for sentence in test_sentences:
         result = classifier.predict(sentence)
         print(f"\nFrase: '{sentence}'")
-        print(f"  -> Predizione: {result['label']} (Confidenza: {result['confidence']:.2%})")
+        print(f"  -> Predizione: {result['label']} (Grado di sicurezza: {result['confidence']:.2%})")
 
     print("\n--- Test completati. ---")

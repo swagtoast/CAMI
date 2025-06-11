@@ -6,7 +6,7 @@ import nltk
 # --- SETUP ---
 nltk.download('punkt', quiet=True)
 CLASSIFIER_DIR = "models/cami_classifier_tuned"
-NER_DIR = "models/cami_ner_v1"
+NER_DIR = "models/cami_ner_v2"
 ID_TO_LABEL_CLASSIFIER = {0: "Letterale", 1: "Metafora"}
 
 # --- MODELLO 1: CLASSIFICATORE ---
@@ -63,9 +63,9 @@ if __name__ == "__main__":
     print("Modelli pronti.\n")
 
     test_sentences = [
-        "Quell'avvocato è uno squalo.",
-        "Il mio capo è un vulcano di idee.",
-        "La notizia lo ha fulminato.",
+        "Ferdinando è svelto come una lepre.",
+        "Ferdinando è un musicista.",
+        "Il mio amico Santa è un bradipo.",
         "Il cielo è coperto di nuvole.",
         "Ho comprato il pane e il latte.",
         "La sua mente è un computer.",
@@ -79,7 +79,7 @@ if __name__ == "__main__":
         classification_result = classifier.predict(sentence)
         label = classification_result['label']
         conf = classification_result['confidence']
-        print(f"  -> Classificazione: {label} (Confidenza: {conf:.1%})")
+        print(f"  -> Classificazione: {label} (Grado di sicurezza: {conf:.1%})")
         
         # 2. SE è una metafora, usiamo il secondo modello per estrarre le parti
         if label == "Metafora":

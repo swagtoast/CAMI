@@ -5,10 +5,10 @@ from transformers import AutoTokenizer, AutoModelForTokenClassification, Trainin
 import numpy as np
 import evaluate
 
-# --- 1. CONFIGURAZIONE ---
-MODEL_NAME = "Musixmatch/umberto-commoncrawl-cased-v1"
+MODEL_NAME = "dbmdz/bert-base-italian-xxl-cased"
 DATASET_PATH = "data/metafore_dataset.csv"
-OUTPUT_MODEL_DIR = "models/cami_ner_v1"
+OUTPUT_MODEL_DIR = "models/cami_ner_v2"
+RANDOM_STATE = 42
 
 label_list = ["O", "B-ARG", "I-ARG", "B-VEI", "I-VEI"]
 label_to_id = {label: i for i, label in enumerate(label_list)}
@@ -23,11 +23,7 @@ def load_and_prepare_data(path):
     return Dataset.from_pandas(df)
 
 def tokenize_and_align_labels(example, tokenizer):
-    tokenized_inputs = tokenizer(
-        example["testo"], 
-        truncation=True, 
-        is_split_into_words=False
-    )
+    tokenized_inputs = tokenizer(example["testo"], truncation=True, is_split_into_words=False)
     word_ids = tokenized_inputs.word_ids()
     previous_word_idx = None
     label_ids = []
@@ -59,19 +55,9 @@ def tokenize_and_align_labels(example, tokenizer):
 def main():
     raw_dataset = load_and_prepare_data(DATASET_PATH)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    print("Processamento del dataset (tokenizzazione e allineamento etichette)...")
-    tokenized_dataset = raw_dataset.map(
-        tokenize_and_align_labels, 
-        fn_kwargs={"tokenizer": tokenizer}
-    )
+    tokenized_dataset = raw_dataset.map(tokenize_and_align_labels, fn_kwargs={"tokenizer": tokenizer})
     tokenized_dataset = tokenized_dataset.remove_columns(raw_dataset.column_names)
-    train_test_split = tokenized_dataset.train_test_split(test_size=0.2)
-    dataset = DatasetDict({
-        "train": train_test_split["train"],
-        "test": train_test_split["test"]
-    })
-    print("Dataset processato e pronto per il training:", dataset)
-    
+    dataset = DatasetDict(tokenized_dataset.train_test_split(test_size=0.2, seed=RANDOM_STATE))
     
     model = AutoModelForTokenClassification.from_pretrained(
         MODEL_NAME, 
@@ -79,18 +65,18 @@ def main():
         id2label={i: l for i, l in enumerate(label_list)},
         label2id=label_to_id
     )
+    
     training_args = TrainingArguments(
         output_dir=OUTPUT_MODEL_DIR,
-        learning_rate=2e-5,
+        learning_rate=3e-5,
         per_device_train_batch_size=8,
         per_device_eval_batch_size=8,
-        num_train_epochs=5,
+        num_train_epochs=3,
         weight_decay=0.01,
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
-        metric_for_best_model="f1",
-        use_mps_device=torch.backends.mps.is_available()
+        metric_for_best_model="f1"
     )
     
     data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
@@ -108,7 +94,6 @@ def main():
             for prediction, label in zip(predictions, labels)
         ]
         results = seqeval.compute(predictions=true_predictions, references=true_labels)
-        # Restituiamo un dizionario più completo per l'analisi
         return {
             "precision": results["overall_precision"],
             "recall": results["overall_recall"],
@@ -126,17 +111,13 @@ def main():
         compute_metrics=compute_metrics
     )
     
-    print("Inizio training del modello NER...")
     trainer.train()
-    
-    print(f"\nSalvataggio del modello NER finale in: {OUTPUT_MODEL_DIR}")
     trainer.save_model(OUTPUT_MODEL_DIR)
     
     print("\n--- Valutazione Finale sul Test Set ---")
     eval_results = trainer.evaluate()
     for key, value in eval_results.items():
         print(f"{key.replace('eval_', '').capitalize()}: {value:.4f}")
-    print("---------------------------------------")
 
 if __name__ == "__main__":
     main()
