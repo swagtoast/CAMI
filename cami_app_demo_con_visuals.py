@@ -145,9 +145,9 @@ if __name__ == "__main__":
     print("Modelli pronti.\n")
 
     test_sentences = [
-        "Quell'avvocato è uno squalo.",
-        "La sua mente è un computer.",
-        "Il mio capo è un vulcano di idee.", # Il modello potrebbe fallire qui, ed è un buon test
+        "Questo calciatore è un attaccante.",
+        "Questo calciatore è un razzo.",
+        "questo film è una discarica.",
     ]
 
     for sentence in test_sentences:
@@ -156,7 +156,7 @@ if __name__ == "__main__":
         classification_result = classifier.predict(sentence)
         label = classification_result['label']
         conf = classification_result['confidence']
-        print(f"  -> Classificazione: {label} (Confidenza: {conf:.1%})")
+        print(f"  -> Classificazione: {label} (Grado di sicurezza: {conf:.1%})")
         
         if label == "Metafora":
             extraction_result = extractor.extract(sentence)
