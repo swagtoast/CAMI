@@ -145,9 +145,10 @@ if __name__ == "__main__":
     print("Modelli pronti.\n")
 
     test_sentences = [
-        "Questo calciatore è un attaccante.",
-        "Questo calciatore è un razzo.",
-        "questo film è una discarica.",
+        "C'è un caldo che mi scioglie.",
+        "C'è un caldo torrido.",
+        "La luna è un occhio.",
+        "La luna è un satellite.",
     ]
 
     for sentence in test_sentences:

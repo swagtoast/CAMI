@@ -131,11 +131,11 @@ if __name__ == "__main__":
                 
                 # Stampiamo le prime 10 metafore trovate, se ce ne sono
                 if report['found_metaphors']:
-                    print("\nPrime 10 metafore individuate (ordinate per confidenza):")
+                    print("\nPrime 10 metafore individuate (ordinate per grado di sicurezza):")
                     # Ordiniamo le metafore per confidenza decrescente prima di stamparle
                     sorted_metaphors = sorted(report['found_metaphors'], key=lambda x: x['confidence'], reverse=True)
                     for metaphor in sorted_metaphors[:10]:
-                        print(f"  - '{metaphor['text']}' (Confidenza: {metaphor['confidence']:.1%})")
+                        print(f"  - '{metaphor['text']}' (Grado di sicurezza: {metaphor['confidence']:.1%})")
                 print("==========================================================\n")
             else:
                 print(f"\nERRORE durante l'analisi del file {filename}: {report['error']}")
