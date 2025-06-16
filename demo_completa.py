@@ -179,11 +179,8 @@ if __name__ == "__main__":
     visualizer = CAMIVisualizer(NER_DIR, global_pca_model)
     print("--- Tutti i modelli sono pronti per l'analisi. ---\n")
 
-    test_sentences = ["Questo caffè era davvero melodico.",
-                      "La pioggia di oggi è stata una benedizione.",
-                      "I legni hanno lasciato il porto.",
-                      "La musica è un linguaggio universale.",
-                      "Il sole è simile a un grande occhio che osserva.",]
+    test_sentences = ["Quell'avvocato è uno squalo.",
+                      "Quell'avvocato è un professionista.",]
 
     for sentence in test_sentences:
         print(f"--- Analisi Frase: '{sentence}' ---")
