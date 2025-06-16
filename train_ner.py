@@ -16,7 +16,7 @@ label_to_id = {label: i for i, label in enumerate(label_list)}
 def load_and_prepare_data(path):
     print(f"Caricamento dataset da: {path}")
     df = pd.read_csv(path, sep=';')
-    df = df[(df['etichetta'] == 1) & df['argomento'].notna() & df['veicolo'].notna()].copy()
+    df = df[df['argomento'].notna() & df['veicolo'].notna()].copy()
     print(f"Trovate {len(df)} frasi metaforiche con argomento e veicolo annotati.")
     df['argomento'] = df['argomento'].astype(str)
     df['veicolo'] = df['veicolo'].astype(str)

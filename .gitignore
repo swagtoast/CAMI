@@ -19,3 +19,6 @@ __pycache__/
 
 # File di debug
 debug_ner_model.py
+
+# Script di valutazione
+scriptdivalutazione.py
