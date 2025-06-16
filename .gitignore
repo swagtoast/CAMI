@@ -22,3 +22,11 @@ debug_ner_model.py
 
 # Script di valutazione
 scriptdivalutazione.py
+
+# File vecchi o temporanei
+train_ner.py
+train_classifier.py
+cami_demo.py
+cami_app_demo_con_visuals.py
+cami_app_demo_con_ner.py
+cami_app_demo_avanzata.py

@@ -1,5 +1,3 @@
-# Filename: demo_completa.py (Versione Finale v2 - Corretta e Robusta)
-
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModelForTokenClassification, pipeline
 import torch.nn.functional as F
@@ -7,7 +5,6 @@ import numpy as np
 import pandas as pd
 import spacy
 
-# --- Import per le visualizzazioni ---
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.decomposition import PCA
@@ -18,8 +15,12 @@ NER_DIR = "models/cami_ner_v5_final"
 DATASET_PATH = "data/metafore_dataset.csv"
 ID_TO_LABEL_CLASSIFIER = {0: "Letterale", 1: "Metafora"}
 
+# Caricamento del modello spaCy una sola volta
+print("Caricamento del modello linguistico spaCy 'it_core_news_lg'...")
+nlp = spacy.load("it_core_news_lg")
+print("Modello spaCy caricato.")
+
 # --- CLASSI (Classifier, Extractor) invariate ---
-# ... (le classi CAMIClassifier e CAMIExtractor sono identiche alla versione precedente)
 class CAMIClassifier:
     def __init__(self, model_path):
         self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -36,6 +37,7 @@ class CAMIClassifier:
             confidence = torch.max(probabilities).item()
             predicted_class_id = torch.argmax(probabilities).item()
             return {"label": ID_TO_LABEL_CLASSIFIER[predicted_class_id], "confidence": confidence}
+
 class CAMIExtractor:
     def __init__(self, model_path):
         self.ner_pipeline = pipeline("token-classification",model=model_path,tokenizer=model_path,aggregation_strategy="simple",device=0 if torch.backends.mps.is_available() else -1)
@@ -50,7 +52,6 @@ class CAMIExtractor:
                     argomento = entity['word']
                 elif entity['entity_group'] == 'VEI':
                     veicolo = entity['word']
-            # Rimuove eventuali spazi bianchi lasciati dalla pipeline
             if argomento: argomento = argomento.replace(" ", "")
             if veicolo: veicolo = veicolo.replace(" ", "")
             return {"argomento": argomento, "veicolo": veicolo}
@@ -58,7 +59,7 @@ class CAMIExtractor:
             print(f"  -> Errore durante l'estrazione NER: {e}")
             return {"argomento": None, "veicolo": None}
 
-# --- CLASSE 3: VISUALIZZATORE DI DATI INTERNI (CON FUNZIONE CORRETTA) ---
+# --- CLASSE 3: VISUALIZZATORE (CON FUNZIONE _get_word_vector) ---
 class CAMIVisualizer:
     def __init__(self, model_path: str, pca_model: PCA):
         print("Caricamento del modello per la visualizzazione...")
@@ -69,45 +70,56 @@ class CAMIVisualizer:
         self.model.eval()
         self.pca_model = pca_model
 
-    # --- MODIFICA CHIAVE: Funzione _get_word_vector riscritta ---
-    def _get_word_vector(self, hidden_states, sentence_tokens, target_word):
+    # --- Funzione _get_word_vector che usa spaCy per la mappatura ---
+    def _get_word_vector(self, hidden_states, tokenized_sentence, sentence_text, target_word):
         """
-        Trova la sequenza di sub-token che corrisponde alla parola target e ne calcola il vettore medio.
+        Usa spaCy per trovare l'esatta posizione della parola e mappa questa posizione
+        sui token di BERT per estrarre i vettori corretti.
         """
-        # Tokenizza la parola target per sapere quali sub-token cercare
-        target_subtokens = self.tokenizer.tokenize(target_word)
+        doc = nlp(sentence_text)
+        target_char_start, target_char_end = -1, -1
+
+        # 1. Trova le coordinate (start, end) della parola nel testo usando spaCy
+        for token in doc:
+            if token.text.lower() == target_word.lower():
+                target_char_start = token.idx
+                target_char_end = token.idx + len(token.text)
+                break
         
-        # Cerca la sequenza di sub-token nella frase tokenizzata
-        for i in range(len(sentence_tokens) - len(target_subtokens) + 1):
-            # Prendi una "fetta" della lista di token della frase lunga quanto la parola target
-            window = sentence_tokens[i : i + len(target_subtokens)]
-            if window == target_subtokens:
-                # Trovato! Ora estrai i vettori corrispondenti a questi indici
-                word_indices = list(range(i, i + len(target_subtokens)))
-                word_vectors = hidden_states[word_indices, :].mean(dim=0)
-                return word_vectors.cpu().numpy()
-        
-        # Se non trova la sequenza, non restituisce nulla
-        return None
+        if target_char_start == -1:
+            return None # Parola non trovata da spaCy
+
+        # 2. Trova tutti i sub-token di BERT che rientrano in quelle coordinate
+        word_indices = []
+        for i, token_id in enumerate(tokenized_sentence.input_ids[0]):
+            # L'attributo .token_to_chars() ci dà la mappatura che ci serve
+            span = tokenized_sentence.token_to_chars(i)
+            if span is not None and span.start >= target_char_start and span.end <= target_char_end:
+                word_indices.append(i)
+
+        if not word_indices:
+            return None # Nessun token trovato per quelle coordinate
+
+        # 3. Calcola la media dei vettori dei sub-token identificati
+        word_vectors = hidden_states[word_indices, :].mean(dim=0)
+        return word_vectors.cpu().numpy()
 
     def plot_vector_space(self, sentence: str, arg: str, veh: str, label: str):
         print(f"  -> 3. Generazione plot dello spazio vettoriale 2D...")
         with torch.no_grad():
+            # Tokenizziamo la frase una sola volta
             inputs = self.tokenizer(sentence, return_tensors="pt").to(self.device)
             outputs = self.model(**inputs)
             last_hidden_state = outputs.hidden_states[-1].squeeze(0)
             
-            # Ottieni i token della frase per la ricerca
-            sentence_tokens = self.tokenizer.convert_ids_to_tokens(inputs["input_ids"][0])
-            
-            arg_vector = self._get_word_vector(last_hidden_state, sentence_tokens, arg)
-            veh_vector = self._get_word_vector(last_hidden_state, sentence_tokens, veh)
+            # Passiamo l'intera frase e gli 'inputs' tokenizzati alla funzione helper
+            arg_vector = self._get_word_vector(last_hidden_state, inputs, sentence, arg)
+            veh_vector = self._get_word_vector(last_hidden_state, inputs, sentence, veh)
 
             if arg_vector is None or veh_vector is None:
                 print(f"    AVVISO: Impossibile generare il plot. Vettori non trovati per '{arg}' o '{veh}'.")
                 return
 
-            # Il resto della funzione è invariato...
             transformed_vectors = self.pca_model.transform([arg_vector, veh_vector])
             plt.figure(figsize=(10, 8))
             plt.scatter(transformed_vectors[0, 0], transformed_vectors[0, 1], c='red', s=150, label=f'Argomento: "{arg}"', alpha=0.8, zorder=5)
@@ -125,7 +137,6 @@ class CAMIVisualizer:
             plt.legend()
             plt.show()
 
-    # La funzione plot_attention_heatmap rimane invariata...
     def plot_attention_heatmap(self, sentence: str, label: str):
         print(f"  -> 4. Generazione heatmap della matrice di attenzione...")
         with torch.no_grad():
@@ -141,8 +152,6 @@ class CAMIVisualizer:
             plt.yticks(rotation=0)
             plt.show()
 
-# --- Funzione setup_global_pca e blocco main() invariati ---
-# ... (incollare qui il resto del codice, non necessita di modifiche)
 def setup_global_pca(model, tokenizer, device, dataset_path):
     print("\n--- Setup del Modello PCA Globale (per grafici confrontabili) ---")
     df = pd.read_csv(dataset_path, sep=';')
@@ -165,6 +174,7 @@ def setup_global_pca(model, tokenizer, device, dataset_path):
     pca.fit(word_vectors)
     print("Modello PCA globale pronto.\n")
     return pca
+
 if __name__ == "__main__":
     print("Avvio Demo Completa e Autonoma di CAMI...")
     
@@ -179,8 +189,15 @@ if __name__ == "__main__":
     visualizer = CAMIVisualizer(NER_DIR, global_pca_model)
     print("--- Tutti i modelli sono pronti per l'analisi. ---\n")
 
-    test_sentences = ["Quell'avvocato è uno squalo.",
-                      "Quell'avvocato è un professionista.",]
+    test_sentences = [
+        "Quell'avvocato è uno squalo.",
+         "Quell'avvocato è un professionista.",
+        "Quell'animale è uno squalo.",
+        "I filosofi sono aeroplani.",
+        "Quei filosofi sono persone.",
+        "La sua mente è un computer.",
+        "Il computer è sul tavolo.",
+    ]
 
     for sentence in test_sentences:
         print(f"--- Analisi Frase: '{sentence}' ---")
@@ -194,7 +211,7 @@ if __name__ == "__main__":
         print(f"  -> 2. Estrazione NER: Argomento='{arg}', Veicolo='{veh}'")
         if arg and veh:
             visualizer.plot_vector_space(sentence, arg, veh, label)
-            visualizer.plot_attention_heatmap(sentence, label)
+            visualizer.plot_attention_heatmap(sentence, label) 
         else:
             print("  -> Visualizzazioni saltate.")
     
