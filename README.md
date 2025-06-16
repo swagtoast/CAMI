@@ -1,6 +1,5 @@
 # CAMI: Classificatore Automatico di Metafore per l’Italiano
 
-
 CAMI è un software basato su Python progettato per l'analisi, l'identificazione e l'interpretazione di metafore nella lingua italiana. Sfrutta modelli di linguaggio Transformer (UmBERTo) per eseguire compiti di Natural Language Processing complessi, offrendo strumenti sia per analisi su larga scala (Distant Reading) sia per analisi di dettaglio (Close Reading).
 
 ## Funzionalità
@@ -18,39 +17,27 @@ CAMI è un software basato su Python progettato per l'analisi, l'identificazione
 Il sistema si basa su due modelli principali, entrambi derivati da architetture Transformer e fine-tuned su un dataset specifico di metafore italiane:
 
 1.  **Classificatore di Sequenze**: Un modello (`cami_classifier_tuned`) basato su **UmBERTo** che classifica un'intera frase.
-2.  **Classificatore di Token (NER)**: Un modello (`cami_ner_v2`) basato su **`dbmdz/bert-base-italian-xxl-cased`** che etichetta ogni singola parola (token) della frase per estrarre Argomento e Veicolo.
+2.  **Classificatore di Token (NER)**: Un modello (`cami_ner_v4_robust`) basato su **`dbmdz/bert-base-italian-xxl-cased`** che etichetta ogni singola parola (token) della frase per estrarre Argomento e Veicolo, addestrato con un robusto sistema di lemmatizzazione.
 
-Il progetto è sviluppato utilizzando PyTorch e la libreria `transformers` di Hugging Face.
+Il progetto è sviluppato utilizzando PyTorch e le librerie `transformers` e `spaCy`.
 
 ## Struttura del Progetto
 
-Ecco una descrizione dei file principali presenti in questa repository:
-
 -   `data/`: Cartella destinata a contenere i dati.
     -   `metafore_dataset.csv`: Il dataset principale per l'addestramento.
-    -   `nuovi_testi/`: La cartella dove inserire i file `.txt` da analizzare con lo strumento di Distant Reading.
--   `.gitignore`: Specifica quali file e cartelle ignorare (es. l'ambiente virtuale `venv/`, i modelli salvati in `models/`).
--   `requirements.txt`: Elenca tutte le librerie Python necessarie per far funzionare il progetto.
-
-### Script di Addestramento
-
--   `train_classifier.py`: **[Fase 1]** Primo script per il training del modello di classificazione. Semplice e basilare.
--   `train_advanced.py`: **[Fase 1.1]** Versione avanzata dello script di training per il classificatore, con tuning degli iperparametri e calcolo di metriche avanzate (F1-score, etc.).
--   `train_ner.py`: **[Fase 3]** Script per addestrare il modello di Token Classification (NER) per l'estrazione di Argomento e Veicolo.
-
-### Script dell'Applicazione
-
--   `cami_app.py`: **[Distant Reading]** Applicazione principale che carica il modello classificatore e analizza tutti i file `.txt` presenti nella cartella `data/nuovi_testi/`.
--   `cami_app_demo_con_visuals.py`: **[Close Reading]** Script di demo che mostra l'integrazione di tutti i modelli. Classifica una serie di frasi di test, estrae Argomento e Veicolo e genera le visualizzazioni (spazio vettoriale 2D e heatmap di attenzione).
--   `cami_demo.py` / `cami_app_demo_con_ner.py`: Versioni di sviluppo intermedie. La versione più aggiornata per la demo è `cami_app_demo_con_visuals.py`.
+    -   `nuovi_testi/`: La cartella dove inserire i file `.txt` da analizzare.
+-   `requirements.txt`: Elenca tutte le librerie Python necessarie.
+-   `train_ner_full.py`: Script per addestrare il modello NER robusto.
+-   `train_advanced.py`: Script per addestrare il modello di classificazione.
+-   `cami_app_full_autonomous.py`: Script di demo che mostra l'integrazione di tutti i modelli.
 
 ## Installazione
 
-Per eseguire il progetto in locale, segui questi passaggi:
+Per eseguire il progetto in locale, segui questi passaggi nell'ordine corretto:
 
 1.  **Clona la repository:**
     ```bash
-    git clone https://github.com/tuo-username/CAMI.git
+    git clone [https://github.com/tuo-username/CAMI.git](https://github.com/tuo-username/CAMI.git)
     cd CAMI
     ```
 
@@ -69,38 +56,33 @@ Per eseguire il progetto in locale, segui questi passaggi:
         venv\Scripts\activate
         ```
 
-4.  **Installa le dipendenze:**
+4.  **Installa le dipendenze Python:**
     ```bash
     pip install -r requirements.txt
+    ```
+
+5.  **Scarica il modello linguistico `spaCy` per l'italiano:**
+    ```bash
+    python -m spacy download it_core_news_lg
     ```
 
 ## Utilizzo
 
 ### 1. Addestrare i Modelli
 
-Se vuoi ri-addestrare i modelli da zero (ad esempio, dopo aver aggiornato il dataset), puoi usare gli script di training.
+Se vuoi ri-addestrare i modelli da zero:
 
 -   **Per addestrare il classificatore di frasi:**
     ```bash
     python train_advanced.py
     ```
--   **Per addestrare il modello di estrazione (NER):**
+-   **Per addestrare il modello di estrazione (NER) robusto:**
     ```bash
-    python train_ner.py
+    python train_ner_full.py
     ```
-    I modelli addestrati verranno salvati nella cartella `models/`.
 
-### 2. Eseguire l'Analisi Distant Reading
+### 2. Eseguire la Demo Autonoma (Close Reading)
 
-1.  Aggiungi i tuoi file di testo (`.txt`) nella cartella `data/nuovi_testi/`.
-2.  Esegui lo script `cami_app.py`:
-    ```bash
-    python cami_app.py
-    ```
-    Lo script analizzerà ogni file e stamperà un report dettagliato nel terminale.
-
-### 3. Eseguire la Demo di Close Reading con Visualizzazioni
-
-Per vedere le funzionalità di estrazione e visualizzazione in azione su frasi di esempio:
+Per vedere il sistema completo in azione con analisi e visualizzazioni:
 ```bash
-python cami_app_demo_con_visuals.py
+python cami_app_full_autonomous.py

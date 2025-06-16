@@ -9,6 +9,8 @@ nltk
 seqeval
 matplotlib
 seaborn
+accelerate
+spacy
 
 # Data handling and utilities
 pandas

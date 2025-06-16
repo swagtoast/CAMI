@@ -9,47 +9,33 @@ import numpy as np
 import evaluate
 
 # ==============================================================================
-# --- 1. TUNING DEGLI IPERPARAMETRI ---
-# Modifica questi valori per sperimentare. Cambiane uno alla volta!
+# --- 1. IPERPARAMETRI E CONFIGURAZIONE ---
 # ==============================================================================
 HP = {
     "model_name": "Musixmatch/umberto-commoncrawl-cased-v1",
     "output_dir": "models/cami_classifier_tuned",
-    "learning_rate": 2e-5,  # Es. prova 2e-5, 3e-5, 5e-5
-    "num_epochs": 4,        # Es. prova 3, 4, 5
-    "batch_size": 16,       # Es. prova 8, 16, 32 (finché la memoria regge)
-    "weight_decay": 0.01    # Di solito non è il primo da cambiare, ma puoi provare 0.0, 0.1
+    "learning_rate": 2e-5,
+    "num_epochs": 4,
+    "batch_size": 16,
+    "weight_decay": 0.01
 }
-# ==============================================================================
 
-# --- 2. CONFIGURAZIONE E COSTANTI ---
+# --- Costanti del Progetto ---
 DATASET_PATH = "data/metafore_dataset.csv" 
 TEXT_COLUMN = "testo"
 LABEL_COLUMN = "etichetta"
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
 
-def check_dataset_balance(df, column):
-    """Stampa la distribuzione delle classi nel dataset."""
-    print("\n--- Analisi del Bilanciamento del Dataset ---")
-    balance = df[column].value_counts(normalize=True)
-    print(balance)
-    print("---------------------------------------------\n")
-    if abs(balance[0] - balance[1]) > 0.2:
-        print("ATTENZIONE: Il dataset è significativamente sbilanciato.")
-        print("L'F1-score è una metrica più affidabile dell'accuratezza in questo caso.")
-    else:
-        print("Il dataset è ragionevolmente bilanciato.")
-
+# --- MODIFICA 1: Definizione esplicita delle etichette ---
+ID2LABEL = {0: "Letterale", 1: "Metafora"}
+LABEL2ID = {"Letterale": 0, "Metafora": 1}
 
 def load_and_prepare_dataset(path: str) -> DatasetDict:
     print(f"Caricamento del dataset da: {path}")
     df = pd.read_csv(path, sep=';')
     df.dropna(subset=[TEXT_COLUMN, LABEL_COLUMN], inplace=True)
     df[LABEL_COLUMN] = df[LABEL_COLUMN].astype(int)
-    
-    # Controlliamo il bilanciamento del dataset completo
-    check_dataset_balance(df, LABEL_COLUMN)
     
     train_df, test_df = train_test_split(
         df, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=df[LABEL_COLUMN]
@@ -65,7 +51,7 @@ def compute_metrics(eval_pred):
     logits, labels = eval_pred
     predictions = np.argmax(logits, axis=-1)
     accuracy = accuracy_metric.compute(predictions=predictions, references=labels)
-    f1 = f1_metric.compute(predictions=predictions, references=labels)
+    f1 = f1_metric.compute(predictions=predictions, references=labels, pos_label=1) # Specifichiamo la classe positiva per F1
     return {"accuracy": accuracy["accuracy"], "f1": f1["f1"]}
 
 def main():
@@ -79,11 +65,18 @@ def main():
     tokenized_datasets = tokenized_datasets.rename_column(LABEL_COLUMN, "labels")
     tokenized_datasets.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
     
-    model = AutoModelForSequenceClassification.from_pretrained(HP["model_name"], num_labels=2)
+    # --- MODIFICA 2: Passiamo le etichette al modello durante l'inizializzazione ---
+    model = AutoModelForSequenceClassification.from_pretrained(
+        HP["model_name"], 
+        num_labels=2,
+        id2label=ID2LABEL,
+        label2id=LABEL2ID
+    )
     
+    device = "cpu"
     if torch.backends.mps.is_available():
-        device = torch.device("mps")
-        model.to(device)
+        device = "mps"
+    model.to(device)
     
     print("\n--- Iperparametri di Training ---")
     for key, value in HP.items():
@@ -111,14 +104,14 @@ def main():
         train_dataset=tokenized_datasets["train"],
         eval_dataset=tokenized_datasets["test"],
         compute_metrics=compute_metrics,
-        tokenizer=tokenizer # Buona pratica passare anche il tokenizer
+        tokenizer=tokenizer
     )
-
+    
+    print("--- Inizio Training del Classificatore (Versione Corretta) ---")
     trainer.train()
     
-    # SALVATAGGIO ESPLICITO DEL MODELLO E TOKENIZER ALLA FINE
-    print(f"Salvataggio del modello finale e del tokenizer in: {HP['output_dir']}")
-    trainer.save_model(HP["output_dir"])
+    print(f"\nTraining completato. Salvataggio del modello migliore in: {HP['output_dir']}")
+    trainer.save_model(HP['output_dir'])
     
     print("\n--- Valutazione Finale sul Modello Migliore ---")
     eval_results = trainer.evaluate()
