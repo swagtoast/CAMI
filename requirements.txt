@@ -15,6 +15,7 @@ spacy
 # Data handling and utilities
 pandas
 scikit-learn
+scipy
 
 # Per lavorare con i notebook (opzionale ma consigliato)
 jupyter

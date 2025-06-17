@@ -5,22 +5,23 @@ import numpy as np
 import pandas as pd
 import spacy
 
+# Import per la visualizzazione e il calcolo della distanza
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from scipy.spatial.distance import cosine
 
-# --- CONFIGURAZIONE ---
+# --- CONFIGURAZIONE GLOBALE ---
 CLASSIFIER_DIR = "models/cami_classifier_tuned"
 NER_DIR = "models/cami_ner_v5_final" 
-DATASET_PATH = "data/metafore_dataset.csv"
 ID_TO_LABEL_CLASSIFIER = {0: "Letterale", 1: "Metafora"}
 
-# Caricamento del modello spaCy una sola volta
+# Caricamento del modello linguistico spaCy
 print("Caricamento del modello linguistico spaCy 'it_core_news_lg'...")
 nlp = spacy.load("it_core_news_lg")
 print("Modello spaCy caricato.")
 
-# --- CLASSI (Classifier, Extractor) invariate ---
+# --- CLASSE 1: Classificatore di Frasi ---
 class CAMIClassifier:
     def __init__(self, model_path):
         self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -29,190 +30,213 @@ class CAMIClassifier:
         self.model.to(self.device)
         self.model.eval()
         print(f"Classifier caricato su dispositivo: {self.device}")
+    
     def predict(self, text):
         with torch.no_grad():
-            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, padding=True).to(self.device)
+            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512).to(self.device)
             logits = self.model(**inputs).logits
             probabilities = F.softmax(logits, dim=-1).squeeze()
             confidence = torch.max(probabilities).item()
             predicted_class_id = torch.argmax(probabilities).item()
             return {"label": ID_TO_LABEL_CLASSIFIER[predicted_class_id], "confidence": confidence}
 
+# --- CLASSE 2: Estrattore di Argomento e Veicolo (NER) ---
 class CAMIExtractor:
     def __init__(self, model_path):
-        self.ner_pipeline = pipeline("token-classification",model=model_path,tokenizer=model_path,aggregation_strategy="simple",device=0 if torch.backends.mps.is_available() else -1)
-        print(f"Extractor (NER) caricato e pronto.")
+        device_num = 0 if torch.backends.mps.is_available() else -1
+        self.ner_pipeline = pipeline(
+            "token-classification", 
+            model=model_path, 
+            tokenizer=model_path, 
+            device=device_num
+        )
+        print(f"Extractor (NER) caricato in modalità di aggregazione manuale (più robusta).")
+
     def extract(self, text: str) -> dict:
         try:
             ner_results = self.ner_pipeline(text)
-            argomento = None
-            veicolo = None
-            for entity in ner_results:
-                if entity['entity_group'] == 'ARG':
-                    argomento = entity['word']
-                elif entity['entity_group'] == 'VEI':
-                    veicolo = entity['word']
-            if argomento: argomento = argomento.replace(" ", "")
-            if veicolo: veicolo = veicolo.replace(" ", "")
-            return {"argomento": argomento, "veicolo": veicolo}
+            entities = {}
+            current_entity_words = []
+            current_entity_type = None
+            for token_data in ner_results:
+                entity_label = token_data['entity']
+                word = token_data['word']
+                if word.startswith("##"):
+                    if current_entity_words:
+                        current_entity_words[-1] = current_entity_words[-1] + word.replace("##", "")
+                    continue
+                if entity_label.startswith('B-'):
+                    if current_entity_type:
+                        entities[current_entity_type] = " ".join(current_entity_words)
+                    current_entity_type = entity_label.split('-')[1]
+                    current_entity_words = [word]
+                elif entity_label.startswith('I-') and current_entity_type == entity_label.split('-')[1]:
+                    current_entity_words.append(word)
+                else:
+                    if current_entity_type:
+                        entities[current_entity_type] = " ".join(current_entity_words)
+                    current_entity_type = None
+                    current_entity_words = []
+            if current_entity_type:
+                entities[current_entity_type] = " ".join(current_entity_words)
+            return {"argomento": entities.get('ARG'), "veicolo": entities.get('VEI')}
         except Exception as e:
             print(f"  -> Errore durante l'estrazione NER: {e}")
             return {"argomento": None, "veicolo": None}
 
-# --- CLASSE 3: VISUALIZZATORE (CON FUNZIONE _get_word_vector) ---
+# --- CLASSE 3: Visualizzatore dello Spazio Semantico ---
 class CAMIVisualizer:
-    def __init__(self, model_path: str, pca_model: PCA):
+    def __init__(self, model_path: str, reducer_model: TSNE):
         print("Caricamento del modello per la visualizzazione...")
         self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.model = AutoModelForTokenClassification.from_pretrained(model_path, output_hidden_states=True, output_attentions=True)
+        self.model = AutoModelForTokenClassification.from_pretrained(
+            model_path, 
+            output_hidden_states=True, 
+            output_attentions=True
+        )
         self.model.to(self.device)
         self.model.eval()
-        self.pca_model = pca_model
+        self.reducer = reducer_model
 
-    # --- Funzione _get_word_vector che usa spaCy per la mappatura ---
     def _get_word_vector(self, hidden_states, tokenized_sentence, sentence_text, target_word):
-        """
-        Usa spaCy per trovare l'esatta posizione della parola e mappa questa posizione
-        sui token di BERT per estrarre i vettori corretti.
-        """
         doc = nlp(sentence_text)
         target_char_start, target_char_end = -1, -1
-
-        # 1. Trova le coordinate (start, end) della parola nel testo usando spaCy
         for token in doc:
             if token.text.lower() == target_word.lower():
                 target_char_start = token.idx
                 target_char_end = token.idx + len(token.text)
                 break
-        
-        if target_char_start == -1:
-            return None # Parola non trovata da spaCy
+        if target_char_start == -1: return None
+        word_indices = [i for i, _ in enumerate(tokenized_sentence.input_ids[0]) if tokenized_sentence.token_to_chars(i) and tokenized_sentence.token_to_chars(i).start >= target_char_start and tokenized_sentence.token_to_chars(i).end <= target_char_end]
+        if not word_indices: return None
+        return hidden_states[word_indices, :].mean(dim=0).cpu().numpy()
 
-        # 2. Trova tutti i sub-token di BERT che rientrano in quelle coordinate
-        word_indices = []
-        for i, token_id in enumerate(tokenized_sentence.input_ids[0]):
-            # L'attributo .token_to_chars() ci dà la mappatura che ci serve
-            span = tokenized_sentence.token_to_chars(i)
-            if span is not None and span.start >= target_char_start and span.end <= target_char_end:
-                word_indices.append(i)
-
-        if not word_indices:
-            return None # Nessun token trovato per quelle coordinate
-
-        # 3. Calcola la media dei vettori dei sub-token identificati
-        word_vectors = hidden_states[word_indices, :].mean(dim=0)
-        return word_vectors.cpu().numpy()
-
-    def plot_vector_space(self, sentence: str, arg: str, veh: str, label: str):
-        print(f"  -> 3. Generazione plot dello spazio vettoriale 2D...")
+    def get_vectors_and_attentions(self, sentence: str, arg: str, veh: str):
         with torch.no_grad():
-            # Tokenizziamo la frase una sola volta
-            inputs = self.tokenizer(sentence, return_tensors="pt").to(self.device)
+            inputs = self.tokenizer(sentence, return_tensors="pt", truncation=True, max_length=512).to(self.device)
             outputs = self.model(**inputs)
             last_hidden_state = outputs.hidden_states[-1].squeeze(0)
-            
-            # Passiamo l'intera frase e gli 'inputs' tokenizzati alla funzione helper
             arg_vector = self._get_word_vector(last_hidden_state, inputs, sentence, arg)
             veh_vector = self._get_word_vector(last_hidden_state, inputs, sentence, veh)
-
-            if arg_vector is None or veh_vector is None:
-                print(f"    AVVISO: Impossibile generare il plot. Vettori non trovati per '{arg}' o '{veh}'.")
-                return
-
-            transformed_vectors = self.pca_model.transform([arg_vector, veh_vector])
-            plt.figure(figsize=(10, 8))
-            plt.scatter(transformed_vectors[0, 0], transformed_vectors[0, 1], c='red', s=150, label=f'Argomento: "{arg}"', alpha=0.8, zorder=5)
-            plt.text(transformed_vectors[0, 0] + 0.05, transformed_vectors[0, 1], f' "{arg}"', fontsize=14)
-            plt.scatter(transformed_vectors[1, 0], transformed_vectors[1, 1], c='blue', s=150, label=f'Veicolo: "{veh}"', alpha=0.8, zorder=5)
-            plt.text(transformed_vectors[1, 0] + 0.05, transformed_vectors[1, 1], f' "{veh}"', fontsize=14)
-            distance = np.linalg.norm(transformed_vectors[0] - transformed_vectors[1])
-            plt.plot([transformed_vectors[0, 0], transformed_vectors[1, 0]], [transformed_vectors[0, 1], transformed_vectors[1, 1]], 'g--', label=f'Distanza Semantica: {distance:.2f}')
-            plt.title(f'Spazio Vettoriale ({label})\n"{sentence}"', fontsize=16)
-            plt.xlabel("Componente Principale 1", fontsize=12)
-            plt.ylabel("Componente Principale 2", fontsize=12)
-            plt.axhline(0, color='grey', linewidth=0.5)
-            plt.axvline(0, color='grey', linewidth=0.5)
-            plt.grid(True, linestyle='--', alpha=0.6)
-            plt.legend()
-            plt.show()
-
-    def plot_attention_heatmap(self, sentence: str, label: str):
-        print(f"  -> 4. Generazione heatmap della matrice di attenzione...")
-        with torch.no_grad():
-            inputs = self.tokenizer(sentence, return_tensors="pt").to(self.device)
-            outputs = self.model(**inputs, output_attentions=True)
-            attentions = outputs.attentions[-1]
+            attentions = outputs.attentions[-1].squeeze(0).mean(dim=0).cpu().numpy()
             tokens = self.tokenizer.convert_ids_to_tokens(inputs["input_ids"][0])
-            attention_matrix = attentions.squeeze(0).mean(dim=0).cpu().numpy()
-            plt.figure(figsize=(12, 10))
-            sns.heatmap(attention_matrix, xticklabels=tokens, yticklabels=tokens, cmap="viridis", annot=False)
-            plt.title(f'Heatmap di Attenzione Media ({label})\n"{sentence}"', fontsize=16)
-            plt.xticks(rotation=45, ha="right")
-            plt.yticks(rotation=0)
-            plt.show()
+            return arg_vector, veh_vector, attentions, tokens
 
-def setup_global_pca(model, tokenizer, device, dataset_path):
-    print("\n--- Setup del Modello PCA Globale (per grafici confrontabili) ---")
-    df = pd.read_csv(dataset_path, sep=';')
-    df.dropna(subset=['argomento', 'veicolo'], inplace=True)
-    arg_words = set(df['argomento'].astype(str).str.lower())
-    veh_words = set(df['veicolo'].astype(str).str.lower())
-    vocab = list(arg_words.union(veh_words))
-    word_vectors = []
-    with torch.no_grad():
-        for word in vocab:
-            if not word or pd.isna(word): continue
-            inputs = tokenizer(word, return_tensors="pt").to(device)
-            vector = model(**inputs, output_hidden_states=True).hidden_states[-1].squeeze(0).mean(dim=0).cpu().numpy()
-            if np.isfinite(vector).all():
-                word_vectors.append(vector)
-            else:
-                print(f"  -> Avviso: il vettore per la parola '{word}' non sarà usato.")
-    print(f"Addestramento del modello PCA su {len(word_vectors)} vettori validi...")
-    pca = PCA(n_components=2, random_state=42)
-    pca.fit(word_vectors)
-    print("Modello PCA globale pronto.\n")
-    return pca
+    def plot_semantic_comparison(self, info1, info2):
+        fig, ax = plt.subplots(figsize=(15, 8))
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
 
+        fig.text(0.1, 0.97, f'Frase 1: "{info1["sentence"]}"', ha='left', va='top', fontsize=12, color='darkred', weight='bold')
+        fig.text(0.1, 0.93, f'Frase 2: "{info2["sentence"]}"', ha='left', va='top', fontsize=12, color='darkblue', weight='bold')
+        fig.text(0.1, 0.89, f'-> Classificazione Frase 1: {info1["label"]} (Sicurezza: {info1["confidence"]:.1%}) / Distanza: {info1["distance"]:.4f}', ha='left', va='top', fontsize=12, color='red')
+        fig.text(0.1, 0.85, f'-> Classificazione Frase 2: {info2["label"]} (Sicurezza: {info2["confidence"]:.1%}) / Distanza: {info2["distance"]:.4f}', ha='left', va='top', fontsize=12, color='blue')
+
+        ax_inset = fig.add_axes([0.1, 0.1, 0.8, 0.7])
+        ax_inset.scatter(info1["arg_2d"][0], info1["arg_2d"][1], c='darkred', s=150, zorder=5, label=f'Argomento 1: "{info1["arg_str"]}"')
+        ax_inset.scatter(info1["veh_2d"][0], info1["veh_2d"][1], c='lightcoral', s=150, zorder=5, label=f'Veicolo 1: "{info1["veh_str"]}"')
+        ax_inset.plot([info1["arg_2d"][0], info1["veh_2d"][0]], [info1["arg_2d"][1], info1["veh_2d"][1]], '--', color='red', alpha=0.8)
+        ax_inset.scatter(info2["arg_2d"][0], info2["arg_2d"][1], c='darkblue', s=150, zorder=5, label=f'Argomento 2: "{info2["arg_str"]}"')
+        ax_inset.scatter(info2["veh_2d"][0], info2["veh_2d"][1], c='lightblue', s=150, zorder=5, label=f'Veicolo 2: "{info2["veh_str"]}"')
+        ax_inset.plot([info2["arg_2d"][0], info2["veh_2d"][0]], [info2["arg_2d"][1], info2["veh_2d"][1]], ':', color='blue', alpha=0.8)
+
+        for info, color in [(info1, 'red'), (info2, 'blue')]:
+            ax_inset.text(info["arg_2d"][0], info["arg_2d"][1] + 0.1, info["arg_str"], color=color, ha='center', fontsize=11)
+            ax_inset.text(info["veh_2d"][0], info["veh_2d"][1] + 0.1, info["veh_str"], color=color, ha='center', fontsize=11)
+
+        ax_inset.set_xlabel("Componente t-SNE 1", fontsize=12)
+        ax_inset.set_ylabel("Componente t-SNE 2", fontsize=12)
+        ax_inset.grid(True, linestyle='--', alpha=0.6)
+        ax_inset.legend(loc='best', fontsize=10)
+        plt.show()
+
+    def plot_attention_heatmap(self, sentence, label, attentions, tokens, cmap):
+        print(f"  -> Generazione heatmap di attenzione per la frase ({label})...")
+        plt.figure(figsize=(12, 8))
+        sns.heatmap(attentions, xticklabels=tokens, yticklabels=tokens, cmap=cmap, annot=False)
+        plt.title(f'Heatmap di Attenzione ({label})\n"{sentence}"', fontsize=16)
+        plt.xticks(rotation=45, ha="right")
+        plt.yticks(rotation=0)
+        plt.tight_layout()
+        plt.show()
+
+# --- Funzione di Setup per t-SNE ---
+def setup_tsne():
+    """Crea e restituisce un'istanza del modello t-SNE."""
+    print("\n--- Setup del Riduttore Dimensionale (t-SNE) ---")
+    tsne_reducer = TSNE(n_components=2, random_state=42, max_iter=1200, perplexity=3, init='pca', learning_rate='auto')
+    print("Modello t-SNE inizializzato e pronto.\n")
+    return tsne_reducer
+
+# --- Blocco di Esecuzione Principale ---
 if __name__ == "__main__":
-    print("Avvio Demo Completa e Autonoma di CAMI...")
+    print("Avvio Demo Automatica CAMI...")
     
     classifier = CAMIClassifier(CLASSIFIER_DIR)
     extractor = CAMIExtractor(NER_DIR)
     
-    vis_model = AutoModelForTokenClassification.from_pretrained(NER_DIR).to(classifier.device)
-    vis_tokenizer = AutoTokenizer.from_pretrained(NER_DIR)
+    tsne_reducer = setup_tsne()
+    visualizer = CAMIVisualizer(NER_DIR, tsne_reducer)
+    
+    print("--- Modelli pronti. Inizio analisi delle coppie di frasi. ---\n")
 
-    global_pca_model = setup_global_pca(vis_model, vis_tokenizer, classifier.device, DATASET_PATH)
-
-    visualizer = CAMIVisualizer(NER_DIR, global_pca_model)
-    print("--- Tutti i modelli sono pronti per l'analisi. ---\n")
-
-    test_sentences = [
-        "Quell'avvocato è uno squalo.",
-         "Quell'avvocato è un professionista.",
-        "Quell'animale è uno squalo.",
-        "I filosofi sono aeroplani.",
-        "Quei filosofi sono persone.",
-        "La sua mente è un computer.",
-        "Il computer è sul tavolo.",
+    sentence_pairs = [
+        ("Quell'avvocato è uno squalo.", "Quell'animale è uno squalo."),
+        ("Milano è un ospedale.", "Milano è una città."),
+        ("La sua voce è un violino.", "Quello strumento è un violino."),
+        ("Quella notizia è un terremoto.", "Quel fenomeno è un terremoto.")
     ]
 
-    for sentence in test_sentences:
-        print(f"--- Analisi Frase: '{sentence}' ---")
-        classification_result = classifier.predict(sentence)
-        label = classification_result['label']
-        conf = classification_result['confidence']
-        print(f"  -> 1. Classificazione: {label} (Confidenza: {conf:.1%})")
-        extraction_result = extractor.extract(sentence)
-        arg = extraction_result.get("argomento")
-        veh = extraction_result.get("veicolo")
-        print(f"  -> 2. Estrazione NER: Argomento='{arg}', Veicolo='{veh}'")
-        if arg and veh:
-            visualizer.plot_vector_space(sentence, arg, veh, label)
-            visualizer.plot_attention_heatmap(sentence, label) 
-        else:
-            print("  -> Visualizzazioni saltate.")
-    
+    for i, (sent1, sent2) in enumerate(sentence_pairs):
+        print(f"--- ANALISI COPPIA #{i+1} ---")
+        print(f"  Frase 1: \"{sent1}\"")
+        print(f"  Frase 2: \"{sent2}\"")
+        
+        class1 = classifier.predict(sent1)
+        class2 = classifier.predict(sent2)
+        
+        print(f"    -> Classificazione Frase 1: {class1['label']} (Grado di sicurezza: {class1['confidence']:.1%})")
+        print(f"    -> Classificazione Frase 2: {class2['label']} (Grado di sicurezza: {class2['confidence']:.1%})")
+
+        extract1 = extractor.extract(sent1)
+        arg1, veh1 = extract1.get("argomento"), extract1.get("veicolo")
+        
+        extract2 = extractor.extract(sent2)
+        arg2, veh2 = extract2.get("argomento"), extract2.get("veicolo")
+
+        if not all([arg1, veh1, arg2, veh2]):
+            print("    -> ERRORE: Estrazione NER fallita per una o più parti. Visualizzazione saltata.")
+            print("-" * 50 + "\n")
+            continue
+        
+        print(f"    -> Entità Estratte: ('{arg1}', '{veh1}') e ('{arg2}', '{veh2}')")
+
+        arg1_vec, veh1_vec, attentions1, tokens1 = visualizer.get_vectors_and_attentions(sent1, arg1, veh1)
+        arg2_vec, veh2_vec, attentions2, tokens2 = visualizer.get_vectors_and_attentions(sent2, arg2, veh2)
+        
+        if any(v is None for v in [arg1_vec, veh1_vec, arg2_vec, veh2_vec]):
+            print("    -> ERRORE: Estrazione vettori fallita. Visualizzazione saltata.")
+            print("-" * 50 + "\n")
+            continue
+        
+        dist1 = cosine(arg1_vec, veh1_vec)
+        dist2 = cosine(arg2_vec, veh2_vec)
+
+        all_vectors = [arg1_vec, veh1_vec, arg2_vec, veh2_vec]
+        transformed_vectors = tsne_reducer.fit_transform(np.array(all_vectors))
+
+        info1 = {"sentence": sent1, "label": class1["label"], "confidence": class1["confidence"], "arg_str": arg1, "veh_str": veh1, "arg_2d": transformed_vectors[0], "veh_2d": transformed_vectors[1], "distance": dist1}
+        info2 = {"sentence": sent2, "label": class2["label"], "confidence": class2["confidence"], "arg_str": arg2, "veh_str": veh2, "arg_2d": transformed_vectors[2], "veh_2d": transformed_vectors[3], "distance": dist2}
+
+        visualizer.plot_semantic_comparison(info1, info2)
+        visualizer.plot_attention_heatmap(sent1, class1["label"], attentions1, tokens1, cmap="Reds")
+        visualizer.plot_attention_heatmap(sent2, class2["label"], attentions2, tokens2, cmap="Blues")
+        
+        print("-" * 50 + "\n")
+
     print("\n--- Fine Demo Completa ---")
