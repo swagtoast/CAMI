@@ -186,10 +186,9 @@ if __name__ == "__main__":
     print("--- Modelli pronti. Inizio analisi delle coppie di frasi. ---\n")
 
     sentence_pairs = [
-        ("Quell'avvocato è uno squalo.", "Quell'animale è uno squalo."),
-        ("Milano è un ospedale.", "Milano è una città."),
-        ("La sua voce è un violino.", "Quello strumento è un violino."),
-        ("Quella notizia è un terremoto.", "Quel fenomeno è un terremoto.")
+        ("Questo cuoco è un cane.", "Questo cuoco è bravo."),
+        ("Il mio sedere è una mongolfiera.", "Ho un sedere grande."),
+        ("Lo studente è una volpe.", "Lo studente è furbo."),
     ]
 
     for i, (sent1, sent2) in enumerate(sentence_pairs):

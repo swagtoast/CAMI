@@ -11,6 +11,7 @@ Questo progetto è stato sviluppato come un dialogo interattivo, evolvendo passo
 -   **Analisi Vettoriale (PCA)**: Rappresenta Argomento e Veicolo su uno spazio 2D per visualizzare la loro "distanza semantica", offrendo spunti su come il modello codifica il significato.
 -   **Interpretabilità del Modello (Attention Heatmaps)**: Genera heatmap delle matrici di attenzione per mostrare quali parole il modello ritiene più correlate durante l'analisi, fornendo una finestra sul suo processo decisionale.
 -   **Analisi di Corpus (Distant Reading)**: Include uno script (`cami_app.py`) per analizzare corpus di testo di grandi dimensioni (es. romanzi) e calcolare un **indice di figuralità**, che misura la densità metaforica del testo.
+-   **Analisi Statistica delle Distanze**: Include uno script (analisi_boxplot.py) per calcolare e confrontare statisticamente le distanze semantiche tra coppie di termini in frasi metaforiche e letterali, visualizzando i risultati con un boxplot.
 
 ## Architettura del Modello
 
@@ -28,6 +29,7 @@ Il sistema si basa su due modelli Transformer fine-tuned su un dataset specifico
 
 -   `data/`: Contiene i dati di training e i testi per l'analisi.
     -   `metafore_dataset.csv`: Il dataset principale per l'addestramento.
+    -   `boxplot_test_dataset.csv`: Un dataset di esempio per l'analisi statistica delle distanze.
     -   `nuovi_testi/`: Cartella dove inserire i file `.txt` da analizzare.
 -   `requirements.txt`: Elenca tutte le dipendenze Python.
 -   **Script di Addestramento**:
@@ -36,6 +38,7 @@ Il sistema si basa su due modelli Transformer fine-tuned su un dataset specifico
 -   **Script di Esecuzione**:
     -   `demo_completa.py`: Esegue una demo completa end-to-end che classifica, estrae e visualizza i risultati per un set di frasi di test.
     -   `cami_app.py`: Esegue l'analisi di Distant Reading su interi file di testo.
+    -   `analisi_boxplot.py`: Esegue l'analisi statistica delle distanze semantiche e genera un boxplot di confronto.
 
 ## Installazione
 
