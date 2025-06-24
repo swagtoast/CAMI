@@ -169,7 +169,7 @@ class CAMIVisualizer:
 def setup_tsne():
     """Crea e restituisce un'istanza del modello t-SNE."""
     print("\n--- Setup del Riduttore Dimensionale (t-SNE) ---")
-    tsne_reducer = TSNE(n_components=2, random_state=42, max_iter=1200, perplexity=3, init='pca', learning_rate='auto')
+    tsne_reducer = TSNE(n_components=2, random_state=42, max_iter=1200, perplexity=3, init='random', learning_rate='auto')
     print("Modello t-SNE inizializzato e pronto.\n")
     return tsne_reducer
 
